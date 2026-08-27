@@ -13,8 +13,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -27,10 +30,18 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * via Testcontainers) against a throwaway {@code /ping} endpoint registered only for this test -
  * Phase 2.1 doesn't add any real controller yet, and the filter's behavior doesn't depend on
  * which controller eventually runs.
+ *
+ * <p>{@code /ping} is exempted from Spring Security via a test-only {@link WebSecurityCustomizer}
+ * (see {@link TestSecurityConfig}): this test is deliberately isolating {@link
+ * TenantResolutionFilter}'s own behavior (200/404 based on tenant resolution), which runs as an
+ * ordinary servlet {@code Filter} independent of - and before - Spring Security's filter chain
+ * (see {@code WebFilterConfiguration}), so it is unaffected by this exemption. Since Phase 2.3
+ * added real authentication, {@code /ping} would otherwise get a 403 from {@code
+ * anyRequest().authenticated()} for having no real route in the production security policy.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
-@Import(TenantResolutionFilterIT.PingController.class)
+@Import({TenantResolutionFilterIT.PingController.class, TenantResolutionFilterIT.TestSecurityConfig.class})
 @Testcontainers
 class TenantResolutionFilterIT {
 
@@ -110,6 +121,15 @@ class TenantResolutionFilterIT {
         @GetMapping("/ping")
         String ping() {
             return "pong";
+        }
+    }
+
+    @TestConfiguration
+    static class TestSecurityConfig {
+
+        @Bean
+        WebSecurityCustomizer pingIsExemptFromSecurity() {
+            return web -> web.ignoring().requestMatchers("/ping");
         }
     }
 }

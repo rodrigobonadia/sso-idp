@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -29,7 +30,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Exercises the REST registration/verification flow end-to-end: real Spring context, real
+ * Exercises the REST registration/verification/login flow end-to-end: real Spring context, real
  * Postgres via Testcontainers, real {@link MockEmailSenderAdapter} - the verification token
  * itself is recovered from that adapter's log line (via a Logback {@link ListAppender}), the same
  * way an operator reading the logs would, rather than reaching into persistence to cheat it out.
@@ -75,6 +76,7 @@ class AuthApiControllerIT {
         createTenantUseCase.execute(new CreateTenantCommand("Acme Corp", "acme-register-api"));
 
         mockMvc.perform(post("/api/register")
+                        .with(csrf())
                         .with(request -> {
                             request.setServerName("acme-register-api.localhost");
                             return request;
@@ -89,6 +91,7 @@ class AuthApiControllerIT {
         String token = extractTokenFromLastMailLog();
 
         mockMvc.perform(post("/api/verify-email")
+                        .with(csrf())
                         .with(request -> {
                             request.setServerName("acme-register-api.localhost");
                             return request;
@@ -104,6 +107,7 @@ class AuthApiControllerIT {
         createTenantUseCase.execute(new CreateTenantCommand("Acme Corp", "acme-reverify-api"));
 
         mockMvc.perform(post("/api/register")
+                .with(csrf())
                 .with(request -> {
                     request.setServerName("acme-reverify-api.localhost");
                     return request;
@@ -114,11 +118,13 @@ class AuthApiControllerIT {
         String token = extractTokenFromLastMailLog();
 
         mockMvc.perform(post("/api/verify-email")
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new VerifyEmailRequest(token))))
                 .andExpect(status().isOk());
 
         mockMvc.perform(post("/api/verify-email")
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new VerifyEmailRequest(token))))
                 .andExpect(status().isConflict());
@@ -130,6 +136,7 @@ class AuthApiControllerIT {
         RegisterRequest request = new RegisterRequest("dup@example.com", "Str0ng!Passw0rd");
 
         mockMvc.perform(post("/api/register")
+                .with(csrf())
                 .with(req -> {
                     req.setServerName("acme-dup-email-api.localhost");
                     return req;
@@ -138,6 +145,7 @@ class AuthApiControllerIT {
                 .content(objectMapper.writeValueAsString(request)));
 
         mockMvc.perform(post("/api/register")
+                        .with(csrf())
                         .with(req -> {
                             req.setServerName("acme-dup-email-api.localhost");
                             return req;
@@ -152,6 +160,7 @@ class AuthApiControllerIT {
         createTenantUseCase.execute(new CreateTenantCommand("Acme Corp", "acme-weak-pw-api"));
 
         mockMvc.perform(post("/api/register")
+                        .with(csrf())
                         .with(request -> {
                             request.setServerName("acme-weak-pw-api.localhost");
                             return request;
@@ -164,6 +173,7 @@ class AuthApiControllerIT {
     @Test
     void rejectsRegistrationWhenTheRequestHasNoTenantSubdomain() throws Exception {
         mockMvc.perform(post("/api/register")
+                        .with(csrf())
                         .with(request -> {
                             request.setServerName("localhost");
                             return request;
@@ -175,8 +185,52 @@ class AuthApiControllerIT {
     }
 
     @Test
+    void logsInAfterRegistrationAndVerificationAndRejectsAWrongPassword() throws Exception {
+        createTenantUseCase.execute(new CreateTenantCommand("Acme Corp", "acme-login-api"));
+
+        mockMvc.perform(post("/api/register")
+                .with(csrf())
+                .with(request -> {
+                    request.setServerName("acme-login-api.localhost");
+                    return request;
+                })
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(
+                        new RegisterRequest("loginapi@example.com", "Str0ng!Passw0rd"))));
+        String token = extractTokenFromLastMailLog();
+        mockMvc.perform(post("/api/verify-email")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new VerifyEmailRequest(token))));
+
+        mockMvc.perform(post("/api/login")
+                        .with(csrf())
+                        .with(request -> {
+                            request.setServerName("acme-login-api.localhost");
+                            return request;
+                        })
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new LoginRequest("loginapi@example.com", "wrong-password"))))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/api/login")
+                        .with(csrf())
+                        .with(request -> {
+                            request.setServerName("acme-login-api.localhost");
+                            return request;
+                        })
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new LoginRequest("loginapi@example.com", "Str0ng!Passw0rd"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("loginapi@example.com"));
+    }
+
+    @Test
     void rejectsVerificationOfAnUnknownTokenAsNotFound() throws Exception {
         mockMvc.perform(post("/api/verify-email")
+                        .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
                                 new VerifyEmailRequest("dGhpc2lzbm90YXJlYWx0b2tlbnZhbHVl"))))

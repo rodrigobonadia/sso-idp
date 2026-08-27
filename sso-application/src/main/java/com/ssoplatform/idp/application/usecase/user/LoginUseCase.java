@@ -1,0 +1,91 @@
+package com.ssoplatform.idp.application.usecase.user;
+
+import com.ssoplatform.idp.application.exception.AccountDisabledException;
+import com.ssoplatform.idp.application.exception.AccountLockedException;
+import com.ssoplatform.idp.application.exception.AccountNotVerifiedException;
+import com.ssoplatform.idp.application.exception.InvalidCredentialsException;
+import com.ssoplatform.idp.application.port.out.PasswordHasher;
+import com.ssoplatform.idp.application.port.out.UserRepository;
+import com.ssoplatform.idp.domain.tenant.TenantId;
+import com.ssoplatform.idp.domain.user.Email;
+import com.ssoplatform.idp.domain.user.InvalidEmailException;
+import com.ssoplatform.idp.domain.user.User;
+import com.ssoplatform.idp.domain.user.UserStatus;
+import java.util.Objects;
+
+/**
+ * Authenticates a user by tenant-scoped e-mail and password.
+ *
+ * <p>All real authentication logic lives here rather than in a framework abstraction (Spring
+ * Security's {@code UserDetailsService}/{@code AuthenticationProvider} assume a single global
+ * username namespace, whereas this system's uniqueness is per tenant), so the web layer's only
+ * job after calling this use case is to establish the HTTP session for the returned identity.
+ *
+ * <p>Ordering is deliberately security-conscious: the password is checked BEFORE the account
+ * status, and a wrong password always raises the exact same {@link InvalidCredentialsException}
+ * regardless of whether the e-mail exists at all for the tenant. This means status-specific
+ * errors ({@link AccountNotVerifiedException}, {@link AccountLockedException}, {@link
+ * AccountDisabledException}) only ever reach a caller who has already proven they know the
+ * correct password - an attacker submitting wrong passwords can never use the error shape to
+ * enumerate which e-mails are registered, verified, locked, or disabled.
+ *
+ * <p>The candidate password is compared as a plain {@code String} ({@link
+ * PasswordHasher#matches(String, com.ssoplatform.idp.domain.user.HashedPassword)}), never through
+ * {@link com.ssoplatform.idp.domain.user.RawPassword#of(String)}: that factory enforces the
+ * platform's current strength policy, which is the right guard when a password is being SET
+ * (registration, change-password) but wrong when a password is being CHECKED - a login attempt
+ * that happens to be short or missing a character class is simply a wrong password, and must fail
+ * the exact same generic way any other wrong password does, not with a policy-shaped error that
+ * would both leak information and wrongly lock out a real user whose genuine password predates a
+ * later policy tightening. The tenant-scoped e-mail lookup has the same shape: a malformed e-mail
+ * can never match a real account, so it collapses into the same {@link InvalidCredentialsException}
+ * rather than surfacing a distinct validation error.
+ */
+public class LoginUseCase {
+
+    private final UserRepository userRepository;
+    private final PasswordHasher passwordHasher;
+
+    public LoginUseCase(UserRepository userRepository, PasswordHasher passwordHasher) {
+        this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
+        this.passwordHasher = Objects.requireNonNull(passwordHasher, "passwordHasher must not be null");
+    }
+
+    public LoginResult execute(LoginCommand command) {
+        Objects.requireNonNull(command, "command must not be null");
+
+        TenantId tenantId = TenantId.of(command.tenantId());
+        User user = findUserOrFail(tenantId, command.email());
+
+        if (!passwordHasher.matches(command.rawPassword(), user.passwordHash())) {
+            user.recordFailedLogin();
+            userRepository.save(user);
+            throw new InvalidCredentialsException();
+        }
+
+        if (user.status() != UserStatus.ACTIVE) {
+            throw switch (user.status()) {
+                case PENDING_VERIFICATION -> new AccountNotVerifiedException();
+                case LOCKED -> new AccountLockedException();
+                case DISABLED -> new AccountDisabledException();
+                case ACTIVE -> throw new IllegalStateException("unreachable");
+            };
+        }
+
+        user.recordSuccessfulLogin();
+        User saved = userRepository.save(user);
+
+        return new LoginResult(saved.id().value(), saved.tenantId().value(), saved.email().value());
+    }
+
+    private User findUserOrFail(TenantId tenantId, String rawEmail) {
+        try {
+            Email email = Email.of(rawEmail);
+            return userRepository.findByTenantIdAndEmail(tenantId, email).orElseThrow(InvalidCredentialsException::new);
+        } catch (InvalidEmailException ex) {
+            // A malformed e-mail can never match a real account - fold it into the exact same
+            // generic failure a valid-but-unregistered e-mail produces.
+            throw new InvalidCredentialsException();
+        }
+    }
+}

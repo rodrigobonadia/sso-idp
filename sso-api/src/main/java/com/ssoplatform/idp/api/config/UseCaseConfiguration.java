@@ -9,6 +9,7 @@ import com.ssoplatform.idp.application.port.out.VerificationTokenRepository;
 import com.ssoplatform.idp.application.usecase.tenant.CreateTenantUseCase;
 import com.ssoplatform.idp.application.usecase.tenant.ResolveActiveTenantBySlugUseCase;
 import com.ssoplatform.idp.application.usecase.user.CreateUserUseCase;
+import com.ssoplatform.idp.application.usecase.user.LoginUseCase;
 import com.ssoplatform.idp.application.usecase.user.RegisterUserUseCase;
 import com.ssoplatform.idp.application.usecase.user.VerifyEmailUseCase;
 import org.springframework.context.annotation.Bean;
@@ -59,5 +60,10 @@ public class UseCaseConfiguration {
             VerificationTokenHasher verificationTokenHasher,
             UserRepository userRepository) {
         return new VerifyEmailUseCase(verificationTokenRepository, verificationTokenHasher, userRepository);
+    }
+
+    @Bean
+    public LoginUseCase loginUseCase(UserRepository userRepository, PasswordHasher passwordHasher) {
+        return new LoginUseCase(userRepository, passwordHasher);
     }
 }

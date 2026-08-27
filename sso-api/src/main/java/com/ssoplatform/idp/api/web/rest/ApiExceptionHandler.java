@@ -1,7 +1,11 @@
 package com.ssoplatform.idp.api.web.rest;
 
 import com.ssoplatform.idp.api.web.tenant.TenantRequiredException;
+import com.ssoplatform.idp.application.exception.AccountDisabledException;
+import com.ssoplatform.idp.application.exception.AccountLockedException;
+import com.ssoplatform.idp.application.exception.AccountNotVerifiedException;
 import com.ssoplatform.idp.application.exception.DuplicateEmailException;
+import com.ssoplatform.idp.application.exception.InvalidCredentialsException;
 import com.ssoplatform.idp.application.exception.TenantNotActiveException;
 import com.ssoplatform.idp.application.exception.TenantNotFoundException;
 import com.ssoplatform.idp.application.exception.VerificationTokenNotFoundException;
@@ -57,6 +61,16 @@ public class ApiExceptionHandler {
     @ExceptionHandler(VerificationTokenExpiredException.class)
     public ResponseEntity<ErrorResponse> handleGone(VerificationTokenExpiredException ex) {
         return respond(HttpStatus.GONE, ex);
+    }
+
+    @ExceptionHandler(InvalidCredentialsException.class)
+    public ResponseEntity<ErrorResponse> handleUnauthorized(InvalidCredentialsException ex) {
+        return respond(HttpStatus.UNAUTHORIZED, ex);
+    }
+
+    @ExceptionHandler({AccountNotVerifiedException.class, AccountLockedException.class, AccountDisabledException.class})
+    public ResponseEntity<ErrorResponse> handleAccountNotUsable(RuntimeException ex) {
+        return respond(HttpStatus.FORBIDDEN, ex);
     }
 
     private ResponseEntity<ErrorResponse> respond(HttpStatus status, RuntimeException ex) {

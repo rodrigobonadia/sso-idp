@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -78,7 +79,8 @@ class RegistrationPageControllerIT {
                     return request;
                 }))
                 .andExpect(status().isOk())
-                .andExpect(view().name("register"));
+                .andExpect(view().name("register"))
+                .andExpect(content().string(containsString("name=\"_csrf\"")));
     }
 
     @Test
@@ -86,6 +88,7 @@ class RegistrationPageControllerIT {
         createTenantUseCase.execute(new CreateTenantCommand("Acme Corp", "acme-register-page-flow"));
 
         mockMvc.perform(post("/register")
+                        .with(csrf())
                         .with(request -> {
                             request.setServerName("acme-register-page-flow.localhost");
                             return request;
@@ -108,6 +111,7 @@ class RegistrationPageControllerIT {
         createTenantUseCase.execute(new CreateTenantCommand("Acme Corp", "acme-register-page-weak"));
 
         mockMvc.perform(post("/register")
+                        .with(csrf())
                         .with(request -> {
                             request.setServerName("acme-register-page-weak.localhost");
                             return request;
