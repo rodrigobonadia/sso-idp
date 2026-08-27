@@ -43,4 +43,16 @@ class MockEmailSenderAdapterTest {
         assertThat(logged).contains("someone@example.com");
         assertThat(logged).contains("https://acme.ssoplatform.example:443/verify-email?token=" + token.value());
     }
+
+    @Test
+    void logsAPasswordResetLinkBuiltFromTheTenantSubdomainAndTheRawToken() {
+        RawVerificationToken token = RawVerificationToken.generate();
+
+        adapter.sendPasswordResetEmail(Email.of("someone@example.com"), "acme", token);
+
+        assertThat(appender.list).hasSize(1);
+        String logged = appender.list.get(0).getFormattedMessage();
+        assertThat(logged).contains("someone@example.com");
+        assertThat(logged).contains("https://acme.ssoplatform.example:443/reset-password?token=" + token.value());
+    }
 }

@@ -5,11 +5,13 @@ import com.ssoplatform.idp.application.exception.AccountDisabledException;
 import com.ssoplatform.idp.application.exception.AccountLockedException;
 import com.ssoplatform.idp.application.exception.AccountNotVerifiedException;
 import com.ssoplatform.idp.application.exception.DuplicateEmailException;
+import com.ssoplatform.idp.application.exception.IncorrectCurrentPasswordException;
 import com.ssoplatform.idp.application.exception.InvalidCredentialsException;
 import com.ssoplatform.idp.application.exception.TenantNotActiveException;
 import com.ssoplatform.idp.application.exception.TenantNotFoundException;
 import com.ssoplatform.idp.application.exception.VerificationTokenNotFoundException;
 import com.ssoplatform.idp.domain.user.InvalidEmailException;
+import com.ssoplatform.idp.domain.user.UserStateException;
 import com.ssoplatform.idp.domain.user.WeakPasswordException;
 import com.ssoplatform.idp.domain.verification.InvalidVerificationTokenException;
 import com.ssoplatform.idp.domain.verification.VerificationTokenAlreadyConsumedException;
@@ -42,7 +44,8 @@ public class ApiExceptionHandler {
         WeakPasswordException.class,
         InvalidEmailException.class,
         InvalidVerificationTokenException.class,
-        TenantRequiredException.class
+        TenantRequiredException.class,
+        IncorrectCurrentPasswordException.class
     })
     public ResponseEntity<ErrorResponse> handleBadRequest(RuntimeException ex) {
         return respond(HttpStatus.BAD_REQUEST, ex);
@@ -68,7 +71,12 @@ public class ApiExceptionHandler {
         return respond(HttpStatus.UNAUTHORIZED, ex);
     }
 
-    @ExceptionHandler({AccountNotVerifiedException.class, AccountLockedException.class, AccountDisabledException.class})
+    @ExceptionHandler({
+        AccountNotVerifiedException.class,
+        AccountLockedException.class,
+        AccountDisabledException.class,
+        UserStateException.class
+    })
     public ResponseEntity<ErrorResponse> handleAccountNotUsable(RuntimeException ex) {
         return respond(HttpStatus.FORBIDDEN, ex);
     }

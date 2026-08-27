@@ -44,4 +44,11 @@ public class MockEmailSenderAdapter implements EmailSender {
                 .formatted(linkScheme, tenantSlug, tenantBaseDomain, serverPort, token.value());
         log.info("[MOCK EMAIL] Verification link for {}: {}", recipient.value(), verificationUrl);
     }
+
+    @Override
+    public void sendPasswordResetEmail(Email recipient, String tenantSlug, RawVerificationToken token) {
+        String resetUrl = "%s://%s.%s:%s/reset-password?token=%s"
+                .formatted(linkScheme, tenantSlug, tenantBaseDomain, serverPort, token.value());
+        log.info("[MOCK EMAIL] Password reset link for {}: {}", recipient.value(), resetUrl);
+    }
 }

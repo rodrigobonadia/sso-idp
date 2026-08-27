@@ -16,4 +16,6 @@ import com.ssoplatform.idp.domain.verification.RawVerificationToken;
 public interface EmailSender {
 
     void sendVerificationEmail(Email recipient, String tenantSlug, RawVerificationToken token);
+
+    void sendPasswordResetEmail(Email recipient, String tenantSlug, RawVerificationToken token);
 }

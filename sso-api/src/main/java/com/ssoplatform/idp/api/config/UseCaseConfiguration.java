@@ -2,15 +2,19 @@ package com.ssoplatform.idp.api.config;
 
 import com.ssoplatform.idp.application.port.out.EmailSender;
 import com.ssoplatform.idp.application.port.out.PasswordHasher;
+import com.ssoplatform.idp.application.port.out.PasswordResetTokenRepository;
 import com.ssoplatform.idp.application.port.out.TenantRepository;
 import com.ssoplatform.idp.application.port.out.UserRepository;
 import com.ssoplatform.idp.application.port.out.VerificationTokenHasher;
 import com.ssoplatform.idp.application.port.out.VerificationTokenRepository;
 import com.ssoplatform.idp.application.usecase.tenant.CreateTenantUseCase;
 import com.ssoplatform.idp.application.usecase.tenant.ResolveActiveTenantBySlugUseCase;
+import com.ssoplatform.idp.application.usecase.user.ChangePasswordUseCase;
 import com.ssoplatform.idp.application.usecase.user.CreateUserUseCase;
 import com.ssoplatform.idp.application.usecase.user.LoginUseCase;
 import com.ssoplatform.idp.application.usecase.user.RegisterUserUseCase;
+import com.ssoplatform.idp.application.usecase.user.RequestPasswordResetUseCase;
+import com.ssoplatform.idp.application.usecase.user.ResetPasswordUseCase;
 import com.ssoplatform.idp.application.usecase.user.VerifyEmailUseCase;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -65,5 +69,30 @@ public class UseCaseConfiguration {
     @Bean
     public LoginUseCase loginUseCase(UserRepository userRepository, PasswordHasher passwordHasher) {
         return new LoginUseCase(userRepository, passwordHasher);
+    }
+
+    @Bean
+    public RequestPasswordResetUseCase requestPasswordResetUseCase(
+            UserRepository userRepository,
+            PasswordResetTokenRepository passwordResetTokenRepository,
+            VerificationTokenHasher verificationTokenHasher,
+            EmailSender emailSender) {
+        return new RequestPasswordResetUseCase(
+                userRepository, passwordResetTokenRepository, verificationTokenHasher, emailSender);
+    }
+
+    @Bean
+    public ResetPasswordUseCase resetPasswordUseCase(
+            PasswordResetTokenRepository passwordResetTokenRepository,
+            VerificationTokenHasher verificationTokenHasher,
+            UserRepository userRepository,
+            PasswordHasher passwordHasher) {
+        return new ResetPasswordUseCase(
+                passwordResetTokenRepository, verificationTokenHasher, userRepository, passwordHasher);
+    }
+
+    @Bean
+    public ChangePasswordUseCase changePasswordUseCase(UserRepository userRepository, PasswordHasher passwordHasher) {
+        return new ChangePasswordUseCase(userRepository, passwordHasher);
     }
 }

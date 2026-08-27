@@ -24,10 +24,18 @@ import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
  * automatically via the hidden {@code _csrf} field Spring injects into {@code th:action} forms.
  *
  * <p>No custom {@code AuthenticationEntryPoint} is configured, so an unauthenticated request to a
- * protected path (currently only {@code GET /account}) gets Spring Security's own default: a
- * plain {@code 403 Forbidden}, with no redirect. That is an acceptable placeholder behavior for
- * this phase's minimal "you are logged in" page; a friendlier redirect-to-login experience can be
- * added later without changing the authentication mechanism itself.
+ * protected path (currently {@code GET /account} and the change-password endpoints) gets Spring
+ * Security's own default: a plain {@code 403 Forbidden}, with no redirect. That is an acceptable
+ * placeholder behavior for this phase's minimal "you are logged in" page; a friendlier
+ * redirect-to-login experience can be added later without changing the authentication mechanism
+ * itself.
+ *
+ * <p>The "forgot password" flow ({@code /forgot-password*}, {@code /reset-password}, and their
+ * REST equivalents) is permitted unauthenticated for the same reason registration and login are:
+ * proving a valid session is exactly what someone who forgot their password cannot do. Changing a
+ * password while already logged in ({@code /account/change-password}, {@code
+ * /api/account/change-password}) is deliberately NOT listed here, since it requires an existing
+ * session to identify whose password is being changed.
  */
 @Configuration
 @EnableWebSecurity
@@ -43,9 +51,14 @@ public class SecurityConfig {
                                 "/register/**",
                                 "/verify-email",
                                 "/login",
+                                "/forgot-password",
+                                "/forgot-password/**",
+                                "/reset-password",
                                 "/api/register",
                                 "/api/verify-email",
-                                "/api/login")
+                                "/api/login",
+                                "/api/forgot-password",
+                                "/api/reset-password")
                         .permitAll()
                         .anyRequest()
                         .authenticated())

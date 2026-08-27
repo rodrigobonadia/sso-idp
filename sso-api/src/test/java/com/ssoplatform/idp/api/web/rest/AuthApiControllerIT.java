@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ssoplatform.idp.application.usecase.tenant.CreateTenantCommand;
 import com.ssoplatform.idp.application.usecase.tenant.CreateTenantUseCase;
 import com.ssoplatform.idp.infrastructure.notification.MockEmailSenderAdapter;
+import jakarta.servlet.http.HttpSession;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.AfterEach;
@@ -24,7 +25,9 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -235,6 +238,158 @@ class AuthApiControllerIT {
                         .content(objectMapper.writeValueAsString(
                                 new VerifyEmailRequest("dGhpc2lzbm90YXJlYWx0b2tlbnZhbHVl"))))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void forgotPasswordAlwaysRespondsTheSameWayRegardlessOfWhetherTheAccountExists() throws Exception {
+        createTenantUseCase.execute(new CreateTenantCommand("Acme Corp", "acme-forgot-api"));
+
+        mockMvc.perform(post("/api/forgot-password")
+                        .with(csrf())
+                        .with(request -> {
+                            request.setServerName("acme-forgot-api.localhost");
+                            return request;
+                        })
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ForgotPasswordRequest("nobody@example.com"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.message").exists());
+    }
+
+    @Test
+    void resetsThePasswordFromTheMockedEmailAndRejectsTheOldPasswordAfterward() throws Exception {
+        createTenantUseCase.execute(new CreateTenantCommand("Acme Corp", "acme-reset-api"));
+        registerVerifyAndLogin("acme-reset-api.localhost", "resetapi@example.com", "Str0ng!Passw0rd");
+
+        mockMvc.perform(post("/api/forgot-password")
+                .with(csrf())
+                .with(request -> {
+                    request.setServerName("acme-reset-api.localhost");
+                    return request;
+                })
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new ForgotPasswordRequest("resetapi@example.com"))));
+        String resetToken = extractTokenFromLastMailLog();
+
+        mockMvc.perform(post("/api/reset-password")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new ResetPasswordRequest(resetToken, "N3wStr0ng!Passw0rd"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("resetapi@example.com"));
+
+        mockMvc.perform(post("/api/login")
+                        .with(csrf())
+                        .with(request -> {
+                            request.setServerName("acme-reset-api.localhost");
+                            return request;
+                        })
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new LoginRequest("resetapi@example.com", "Str0ng!Passw0rd"))))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/api/login")
+                        .with(csrf())
+                        .with(request -> {
+                            request.setServerName("acme-reset-api.localhost");
+                            return request;
+                        })
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new LoginRequest("resetapi@example.com", "N3wStr0ng!Passw0rd"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void rejectsResetWithAnUnknownTokenAsNotFound() throws Exception {
+        mockMvc.perform(post("/api/reset-password")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ResetPasswordRequest(
+                                "dGhpc2lzbm90YXJlYWx0b2tlbnZhbHVl", "N3wStr0ng!Passw0rd"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void changesThePasswordWhenAuthenticatedAndInvalidatesTheOldSession() throws Exception {
+        createTenantUseCase.execute(new CreateTenantCommand("Acme Corp", "acme-changepw-api"));
+        HttpSession session =
+                registerVerifyAndLogin("acme-changepw-api.localhost", "changepwapi@example.com", "Str0ng!Passw0rd");
+
+        mockMvc.perform(post("/api/account/change-password")
+                        .with(csrf())
+                        .session((MockHttpSession) session)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new ChangePasswordRequest("Str0ng!Passw0rd", "N3wStr0ng!Passw0rd"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("changepwapi@example.com"));
+
+        // The very session that just changed the password must no longer be authenticated.
+        mockMvc.perform(post("/api/account/change-password")
+                        .with(csrf())
+                        .session((MockHttpSession) session)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new ChangePasswordRequest("N3wStr0ng!Passw0rd", "AnotherStr0ng!Pass"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void rejectsChangePasswordWithAnIncorrectCurrentPasswordAsBadRequest() throws Exception {
+        createTenantUseCase.execute(new CreateTenantCommand("Acme Corp", "acme-changepw-wrong-api"));
+        HttpSession session = registerVerifyAndLogin(
+                "acme-changepw-wrong-api.localhost", "changepwwrongapi@example.com", "Str0ng!Passw0rd");
+
+        mockMvc.perform(post("/api/account/change-password")
+                        .with(csrf())
+                        .session((MockHttpSession) session)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new ChangePasswordRequest("totally-wrong", "N3wStr0ng!Passw0rd"))))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void rejectsChangePasswordWithoutAnAuthenticatedSessionAsForbidden() throws Exception {
+        mockMvc.perform(post("/api/account/change-password")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new ChangePasswordRequest("whatever", "N3wStr0ng!Passw0rd"))))
+                .andExpect(status().isForbidden());
+    }
+
+    private HttpSession registerVerifyAndLogin(String tenantSubdomain, String email, String password) throws Exception {
+        mockMvc.perform(post("/api/register")
+                .with(csrf())
+                .with(request -> {
+                    request.setServerName(tenantSubdomain);
+                    return request;
+                })
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new RegisterRequest(email, password))));
+        String token = extractTokenFromLastMailLog();
+        mockMvc.perform(post("/api/verify-email")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new VerifyEmailRequest(token))));
+
+        MvcResult loginResult = mockMvc.perform(post("/api/login")
+                        .with(csrf())
+                        .with(request -> {
+                            request.setServerName(tenantSubdomain);
+                            return request;
+                        })
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest(email, password))))
+                .andExpect(status().isOk())
+                .andReturn();
+        HttpSession session = loginResult.getRequest().getSession(false);
+        assertThat(session).isNotNull();
+        return session;
     }
 
     private String extractTokenFromLastMailLog() {

@@ -9,6 +9,8 @@
 
 <p th:if="${errorMessage}" th:text="${errorMessage}" style="color: red;"></p>
 <p th:if="${param.logout}">You have been signed out.</p>
+<p th:if="${param['password-reset']}">Your password has been reset. Please sign in.</p>
+<p th:if="${param['password-changed']}">Your password has been changed. Please sign in.</p>
 
 <form th:action="@{/login}" th:object="${loginForm}" method="post">
     <div>
@@ -21,5 +23,6 @@
     </div>
     <button type="submit">Sign in</button>
 </form>
+<p><a th:href="@{/forgot-password}">Forgot your password?</a></p>
 </body>
 </html>
