@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.ssoplatform</groupId>
+    <artifactId>sso-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>SSO Platform</name>
+    <description>Custom-built OAuth2/OIDC Identity Provider, implemented from scratch following Clean Architecture</description>
+
+    <modules>
+        <module>sso-domain</module>
+        <module>sso-application</module>
+        <module>sso-infrastructure</module>
+        <module>sso-api</module>
+    </modules>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.release>21</maven.compiler.release>
+        <spring-boot.version>3.3.4</spring-boot.version>
+        <junit.version>5.10.3</junit.version>
+        <mockito.version>5.12.0</mockito.version>
+        <testcontainers.version>1.20.1</testcontainers.version>
+        <assertj.version>3.26.3</assertj.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Spring Boot BOM: used only by sso-infrastructure and sso-api.
+                 sso-domain and sso-application must NEVER depend on Spring. -->
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.junit</groupId>
+                <artifactId>junit-bom</artifactId>
+                <version>${junit.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.assertj</groupId>
+                <artifactId>assertj-core</artifactId>
+                <version>${assertj.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-core</artifactId>
+                <version>${mockito.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-junit-jupiter</artifactId>
+                <version>${mockito.version}</version>
+                <scope>test</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- Every module gets these test dependencies for free -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.13.0</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>3.3.1</version>
+                </plugin>
+                <plugin>
+                    <!-- Runs *IT.java classes (integration tests, e.g. Testcontainers-backed ones) during
+                         `mvn verify`. Surefire alone only picks up *Test.java and never runs these. -->
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-failsafe-plugin</artifactId>
+                    <version>3.3.1</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.jacoco</groupId>
+                    <artifactId>jacoco-maven-plugin</artifactId>
+                    <version>0.8.12</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <configuration>
+                    <!-- Docker Desktop 4.5x / Docker Engine 29 raised the minimum accepted API
+                         version to 1.40+, but the docker-java client shaded inside Testcontainers
+                         1.20.x falls back to the ancient API version 1.32 when it fails to
+                         negotiate cleanly over a plain TCP (non-TLS) Docker Engine endpoint - which
+                         is exactly the setup required on native Windows without WSL integration.
+                         The daemon then rejects it with "client version 1.32 is too old".
+                         This is a confirmed, widely-reported bug (see testcontainers-java#11210,
+                         #11212, #11235 and spring-projects/spring-boot#48104) with no fix in the
+                         Testcontainers 1.x line; the real fix ships only in Testcontainers 2.x,
+                         which Spring Boot's own issue tracker confirms is NOT compatible with
+                         Spring Boot 3.3.x's spring-boot-testcontainers / @ServiceConnection
+                         support (it requires Spring Boot 4.x). So instead of bumping
+                         Testcontainers - which would trade this bug for a worse one - we pin the
+                         API version docker-java requests to 1.44, which is comfortably inside the
+                         range Docker Engine 29 accepts. This is the same workaround Spring Boot's
+                         maintainers document for this exact issue. -->
+                    <systemPropertyVariables>
+                        <api.version>1.44</api.version>
+                    </systemPropertyVariables>
+                    <!-- spring-boot-starter-parent sets this by default, but we don't extend it (we
+                         define our own dependencyManagement/build instead), so it has to be set
+                         explicitly here. Without it, on any module where spring-boot-maven-plugin's
+                         `repackage` goal runs (sso-api), Failsafe puts the repackaged fat jar
+                         (BOOT-INF/classes/... layout) on the test classpath instead of the plain
+                         target/classes directory, which breaks Spring's test-annotation scanning
+                         with errors like "Failed to find merged annotation for @BootstrapWith" or
+                         "Unable to find a @SpringBootConfiguration". See
+                         spring-projects/spring-boot#25473 and the fix merged in #25621. -->
+                    <classesDirectory>${project.build.outputDirectory}</classesDirectory>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

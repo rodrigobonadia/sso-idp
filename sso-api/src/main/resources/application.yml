@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: sso-api
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:sso}
+    username: ${DB_USER:sso}
+    password: ${DB_PASSWORD:sso}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway is the single source of truth for the schema; Hibernate only validates that the
+      # entity mappings match what Flyway already created - it must never auto-generate DDL.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+
+server:
+  port: ${SERVER_PORT:8080}
+
+logging:
+  level:
+    root: INFO
+    com.ssoplatform.idp: DEBUG

@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-sso}
+      POSTGRES_USER: ${DB_USER:-sso}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-sso}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - sso-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-sso} -d ${DB_NAME:-sso}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-sso}
+      DB_USER: ${DB_USER:-sso}
+      DB_PASSWORD: ${DB_PASSWORD:-sso}
+      SERVER_PORT: 8080
+    ports:
+      - "${APP_PORT:-8080}:8080"
+
+volumes:
+  sso-postgres-data:
