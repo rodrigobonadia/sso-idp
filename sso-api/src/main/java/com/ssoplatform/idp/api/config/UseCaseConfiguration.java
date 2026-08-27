@@ -4,6 +4,7 @@ import com.ssoplatform.idp.application.port.out.PasswordHasher;
 import com.ssoplatform.idp.application.port.out.TenantRepository;
 import com.ssoplatform.idp.application.port.out.UserRepository;
 import com.ssoplatform.idp.application.usecase.tenant.CreateTenantUseCase;
+import com.ssoplatform.idp.application.usecase.tenant.ResolveActiveTenantBySlugUseCase;
 import com.ssoplatform.idp.application.usecase.user.CreateUserUseCase;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -30,5 +31,10 @@ public class UseCaseConfiguration {
     public CreateUserUseCase createUserUseCase(
             UserRepository userRepository, TenantRepository tenantRepository, PasswordHasher passwordHasher) {
         return new CreateUserUseCase(userRepository, tenantRepository, passwordHasher);
+    }
+
+    @Bean
+    public ResolveActiveTenantBySlugUseCase resolveActiveTenantBySlugUseCase(TenantRepository tenantRepository) {
+        return new ResolveActiveTenantBySlugUseCase(tenantRepository);
     }
 }

@@ -7,4 +7,8 @@ public class TenantNotFoundException extends ApplicationException {
     public TenantNotFoundException(UUID tenantId) {
         super("No tenant found with id '" + tenantId + "'");
     }
+
+    public TenantNotFoundException(String slug) {
+        super("No tenant found with slug '" + slug + "'");
+    }
 }

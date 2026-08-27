@@ -21,6 +21,14 @@ spring:
     enabled: true
     locations: classpath:db/migration
 
+app:
+  tenant:
+    # Base domain used to resolve the tenant from a request's subdomain (e.g. with the default
+    # below, a request to acme.localhost is resolved to the tenant whose slug is "acme"). In
+    # production this should be set to the platform's real domain (e.g. ssoplatform.example) via
+    # the TENANT_BASE_DOMAIN environment variable.
+    base-domain: ${TENANT_BASE_DOMAIN:localhost}
+
 management:
   endpoints:
     web:
