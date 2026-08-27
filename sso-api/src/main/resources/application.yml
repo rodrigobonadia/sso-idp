@@ -28,6 +28,11 @@ app:
     # production this should be set to the platform's real domain (e.g. ssoplatform.example) via
     # the TENANT_BASE_DOMAIN environment variable.
     base-domain: ${TENANT_BASE_DOMAIN:localhost}
+  mail:
+    # Scheme used when building links (e.g. e-mail verification) that point back at a tenant's
+    # subdomain. Local development has no TLS, hence the "http" default; a real deployment should
+    # set this to "https" via the MAIL_LINK_SCHEME environment variable.
+    link-scheme: ${MAIL_LINK_SCHEME:http}
 
 management:
   endpoints:
