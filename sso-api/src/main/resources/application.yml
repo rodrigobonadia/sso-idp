@@ -33,6 +33,14 @@ app:
     # subdomain. Local development has no TLS, hence the "http" default; a real deployment should
     # set this to "https" via the MAIL_LINK_SCHEME environment variable.
     link-scheme: ${MAIL_LINK_SCHEME:http}
+  signing-key:
+    # Master secret used to encrypt/decrypt RSA private signing keys at rest (AES-256-GCM key
+    # derived via SHA-256 of this value - see AesGcmPrivateKeyEncryptorAdapter). The default below
+    # is for local development ONLY and provides no real protection - any real deployment MUST
+    # override this via the SIGNING_KEY_ENCRYPTION_SECRET environment variable, with a strong,
+    # randomly generated value kept out of the database entirely (see architecture_decisions.md,
+    # decision (j)).
+    encryption-secret: ${SIGNING_KEY_ENCRYPTION_SECRET:dev-only-insecure-default-change-me}
 
 management:
   endpoints:

@@ -22,12 +22,19 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 /**
- * Translates application/domain exceptions into HTTP responses, scoped only to
- * {@code web.rest} controllers - the MVC controllers under {@code web.mvc} render these same
- * exceptions as HTML pages instead (see {@code RegistrationPageController}), so a shared,
- * unscoped {@code @RestControllerAdvice} would be the wrong tool for either surface.
+ * Translates application/domain exceptions into HTTP responses, scoped only to the JSON-returning
+ * controller packages ({@code web.rest}, plus {@code web.oidc} and {@code web.internal} added in
+ * Phase 3.2 for the JWKS and signing-key-generation endpoints) - the MVC controllers under
+ * {@code web.mvc} render these same exceptions as HTML pages instead (see {@code
+ * RegistrationPageController}), so a shared, unscoped {@code @RestControllerAdvice} would be the
+ * wrong tool for either surface.
  */
-@RestControllerAdvice(basePackages = "com.ssoplatform.idp.api.web.rest")
+@RestControllerAdvice(
+        basePackages = {
+            "com.ssoplatform.idp.api.web.rest",
+            "com.ssoplatform.idp.api.web.oidc",
+            "com.ssoplatform.idp.api.web.internal"
+        })
 public class ApiExceptionHandler {
 
     @ExceptionHandler(DuplicateEmailException.class)

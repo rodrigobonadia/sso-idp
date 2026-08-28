@@ -3,10 +3,15 @@ package com.ssoplatform.idp.api.config;
 import com.ssoplatform.idp.application.port.out.EmailSender;
 import com.ssoplatform.idp.application.port.out.PasswordHasher;
 import com.ssoplatform.idp.application.port.out.PasswordResetTokenRepository;
+import com.ssoplatform.idp.application.port.out.PrivateKeyEncryptor;
+import com.ssoplatform.idp.application.port.out.SigningKeyPairGenerator;
+import com.ssoplatform.idp.application.port.out.SigningKeyRepository;
 import com.ssoplatform.idp.application.port.out.TenantRepository;
 import com.ssoplatform.idp.application.port.out.UserRepository;
 import com.ssoplatform.idp.application.port.out.VerificationTokenHasher;
 import com.ssoplatform.idp.application.port.out.VerificationTokenRepository;
+import com.ssoplatform.idp.application.usecase.signingkey.GenerateSigningKeyUseCase;
+import com.ssoplatform.idp.application.usecase.signingkey.ListSigningKeysUseCase;
 import com.ssoplatform.idp.application.usecase.tenant.CreateTenantUseCase;
 import com.ssoplatform.idp.application.usecase.tenant.ResolveActiveTenantBySlugUseCase;
 import com.ssoplatform.idp.application.usecase.user.ChangePasswordUseCase;
@@ -94,5 +99,20 @@ public class UseCaseConfiguration {
     @Bean
     public ChangePasswordUseCase changePasswordUseCase(UserRepository userRepository, PasswordHasher passwordHasher) {
         return new ChangePasswordUseCase(userRepository, passwordHasher);
+    }
+
+    @Bean
+    public GenerateSigningKeyUseCase generateSigningKeyUseCase(
+            TenantRepository tenantRepository,
+            SigningKeyRepository signingKeyRepository,
+            SigningKeyPairGenerator signingKeyPairGenerator,
+            PrivateKeyEncryptor privateKeyEncryptor) {
+        return new GenerateSigningKeyUseCase(
+                tenantRepository, signingKeyRepository, signingKeyPairGenerator, privateKeyEncryptor);
+    }
+
+    @Bean
+    public ListSigningKeysUseCase listSigningKeysUseCase(SigningKeyRepository signingKeyRepository) {
+        return new ListSigningKeysUseCase(signingKeyRepository);
     }
 }
