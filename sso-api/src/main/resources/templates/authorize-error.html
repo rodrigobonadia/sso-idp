@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8" />
+    <title>Authorization request error</title>
+</head>
+<body>
+<h1>This sign-in request could not be completed</h1>
+<p th:text="${errorMessage}"></p>
+<p>The application that sent you here has a configuration problem. Please contact whoever
+    manages that application rather than retrying - this page is shown instead of returning you
+    to that application because we cannot safely confirm where it would be safe to send you.</p>
+</body>
+</html>

@@ -5,8 +5,12 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.Http403ForbiddenEntryPoint;
+import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+import org.springframework.security.web.util.matcher.AnyRequestMatcher;
 
 /**
  * Application-wide HTTP security policy.
@@ -35,12 +39,46 @@ import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
  * (non-masking) handler here means both the cookie and the rendered form field always carry the
  * identical raw token, so the two client patterns behave consistently.
  *
- * <p>No custom {@code AuthenticationEntryPoint} is configured, so an unauthenticated request to a
- * protected path (currently {@code GET /account} and the change-password endpoints) gets Spring
- * Security's own default: a plain {@code 403 Forbidden}, with no redirect. That is an acceptable
- * placeholder behavior for this phase's minimal "you are logged in" page; a friendlier
- * redirect-to-login experience can be added later without changing the authentication mechanism
- * itself.
+ * <p>No custom {@code AuthenticationEntryPoint} is configured for MOST protected paths, so an
+ * unauthenticated request to one of them (currently {@code GET /account} and the change-password
+ * endpoints) gets Spring Security's own default: a plain {@code 403 Forbidden}, with no redirect.
+ * That is an acceptable placeholder behavior for this phase's minimal "you are logged in" page; a
+ * friendlier redirect-to-login experience can be added later without changing the authentication
+ * mechanism itself.
+ *
+ * <p>{@code GET /authorize} (Phase 3.3) is the one deliberate exception:
+ * {@code .exceptionHandling().defaultAuthenticationEntryPointFor(...)} wires a {@link
+ * LoginUrlAuthenticationEntryPoint} scoped to just that path, so an unauthenticated request there
+ * redirects to {@code /login} instead of returning 403 - the standard OAuth UX, where a user who
+ * isn't signed in yet still needs to be able to complete the authorization flow after logging in.
+ * This works together with a mechanism Spring Security already provides "for free" regardless of
+ * which entry point is configured: {@code ExceptionTranslationFilter} always calls {@code
+ * RequestCache#saveRequest(...)} (the default {@code HttpSessionRequestCache}) before invoking
+ * whichever entry point applies, for every unauthenticated request to a protected path - it is only
+ * ever USED here, on the {@code /authorize} path, because {@code LoginPageController}'s {@code
+ * POST /login} handler explicitly checks that cache after establishing a session and, if a request
+ * was saved, redirects there instead of to the usual {@code /account} - see that controller's
+ * Javadoc for the resume side of this flow.
+ *
+ * <p><b>{@code defaultAuthenticationEntryPointFor} gotcha (found by a real {@code mvn clean
+ * verify} run, not by inspection):</b> {@link
+ * org.springframework.security.config.annotation.web.configurers.ExceptionHandlingConfigurer}
+ * only builds an actual matcher-dispatching {@code DelegatingAuthenticationEntryPoint} when TWO OR
+ * MORE {@code defaultAuthenticationEntryPointFor(...)} mappings are registered; with exactly one
+ * mapping (as this class originally had, wiring only the {@code /authorize} entry above), Spring
+ * Security uses that single entry point for EVERY unauthenticated request application-wide,
+ * silently ignoring its {@link AntPathRequestMatcher} entirely. That regressed every other
+ * protected path this class's Javadoc documents as plain-403 ({@code /account}, the
+ * change-password endpoints, {@code POST /internal/signing-keys}, etc.) to redirect to
+ * {@code /login} instead - caught by five pre-existing, otherwise-unrelated IT classes failing
+ * with {@code expected:<403> but was:<302>} the moment Phase 3.3's real build ran. Fixed by
+ * registering a SECOND mapping below, {@link Http403ForbiddenEntryPoint} for {@link
+ * AnyRequestMatcher#INSTANCE} - with two mappings present, Spring Security builds the real
+ * delegating entry point and matches {@code /authorize} first (registration order), falling back
+ * to the original 403 behavior for everything else. LESSON: {@code
+ * defaultAuthenticationEntryPointFor} must always be called at least twice - a single call is not
+ * "one path gets a custom entry point, everything else keeps the default" but "this entry point
+ * for all requests," which defeats the whole point of the method's per-path matcher parameter.
  *
  * <p>The "forgot password" flow ({@code /forgot-password*}, {@code /reset-password}, and their
  * REST equivalents) is permitted unauthenticated for the same reason registration and login are:
@@ -83,6 +121,11 @@ public class SecurityConfig {
                         .permitAll()
                         .anyRequest()
                         .authenticated())
+                .exceptionHandling(exceptions -> exceptions
+                        .defaultAuthenticationEntryPointFor(
+                                new LoginUrlAuthenticationEntryPoint("/login"), new AntPathRequestMatcher("/authorize"))
+                        .defaultAuthenticationEntryPointFor(
+                                new Http403ForbiddenEntryPoint(), AnyRequestMatcher.INSTANCE))
                 .logout(logout -> logout.logoutUrl("/logout")
                         .logoutSuccessUrl("/login?logout")
                         .invalidateHttpSession(true)

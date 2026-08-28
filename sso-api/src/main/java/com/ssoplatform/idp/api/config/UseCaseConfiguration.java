@@ -1,6 +1,8 @@
 package com.ssoplatform.idp.api.config;
 
+import com.ssoplatform.idp.application.port.out.AuthorizationCodeRepository;
 import com.ssoplatform.idp.application.port.out.EmailSender;
+import com.ssoplatform.idp.application.port.out.OAuthClientRepository;
 import com.ssoplatform.idp.application.port.out.PasswordHasher;
 import com.ssoplatform.idp.application.port.out.PasswordResetTokenRepository;
 import com.ssoplatform.idp.application.port.out.PrivateKeyEncryptor;
@@ -10,6 +12,7 @@ import com.ssoplatform.idp.application.port.out.TenantRepository;
 import com.ssoplatform.idp.application.port.out.UserRepository;
 import com.ssoplatform.idp.application.port.out.VerificationTokenHasher;
 import com.ssoplatform.idp.application.port.out.VerificationTokenRepository;
+import com.ssoplatform.idp.application.usecase.authorization.AuthorizeUseCase;
 import com.ssoplatform.idp.application.usecase.signingkey.GenerateSigningKeyUseCase;
 import com.ssoplatform.idp.application.usecase.signingkey.ListSigningKeysUseCase;
 import com.ssoplatform.idp.application.usecase.tenant.CreateTenantUseCase;
@@ -114,5 +117,13 @@ public class UseCaseConfiguration {
     @Bean
     public ListSigningKeysUseCase listSigningKeysUseCase(SigningKeyRepository signingKeyRepository) {
         return new ListSigningKeysUseCase(signingKeyRepository);
+    }
+
+    @Bean
+    public AuthorizeUseCase authorizeUseCase(
+            OAuthClientRepository oauthClientRepository,
+            AuthorizationCodeRepository authorizationCodeRepository,
+            VerificationTokenHasher verificationTokenHasher) {
+        return new AuthorizeUseCase(oauthClientRepository, authorizationCodeRepository, verificationTokenHasher);
     }
 }
