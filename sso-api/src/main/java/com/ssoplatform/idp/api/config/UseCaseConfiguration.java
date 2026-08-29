@@ -1,7 +1,10 @@
 package com.ssoplatform.idp.api.config;
 
 import com.ssoplatform.idp.application.port.out.AuthorizationCodeRepository;
+import com.ssoplatform.idp.application.port.out.ClientSecretHasher;
+import com.ssoplatform.idp.application.port.out.CodeVerifierValidator;
 import com.ssoplatform.idp.application.port.out.EmailSender;
+import com.ssoplatform.idp.application.port.out.JwtSigner;
 import com.ssoplatform.idp.application.port.out.OAuthClientRepository;
 import com.ssoplatform.idp.application.port.out.PasswordHasher;
 import com.ssoplatform.idp.application.port.out.PasswordResetTokenRepository;
@@ -17,6 +20,7 @@ import com.ssoplatform.idp.application.usecase.signingkey.GenerateSigningKeyUseC
 import com.ssoplatform.idp.application.usecase.signingkey.ListSigningKeysUseCase;
 import com.ssoplatform.idp.application.usecase.tenant.CreateTenantUseCase;
 import com.ssoplatform.idp.application.usecase.tenant.ResolveActiveTenantBySlugUseCase;
+import com.ssoplatform.idp.application.usecase.token.TokenUseCase;
 import com.ssoplatform.idp.application.usecase.user.ChangePasswordUseCase;
 import com.ssoplatform.idp.application.usecase.user.CreateUserUseCase;
 import com.ssoplatform.idp.application.usecase.user.LoginUseCase;
@@ -125,5 +129,26 @@ public class UseCaseConfiguration {
             AuthorizationCodeRepository authorizationCodeRepository,
             VerificationTokenHasher verificationTokenHasher) {
         return new AuthorizeUseCase(oauthClientRepository, authorizationCodeRepository, verificationTokenHasher);
+    }
+
+    @Bean
+    public TokenUseCase tokenUseCase(
+            OAuthClientRepository oauthClientRepository,
+            ClientSecretHasher clientSecretHasher,
+            AuthorizationCodeRepository authorizationCodeRepository,
+            VerificationTokenHasher verificationTokenHasher,
+            CodeVerifierValidator codeVerifierValidator,
+            SigningKeyRepository signingKeyRepository,
+            PrivateKeyEncryptor privateKeyEncryptor,
+            JwtSigner jwtSigner) {
+        return new TokenUseCase(
+                oauthClientRepository,
+                clientSecretHasher,
+                authorizationCodeRepository,
+                verificationTokenHasher,
+                codeVerifierValidator,
+                signingKeyRepository,
+                privateKeyEncryptor,
+                jwtSigner);
     }
 }

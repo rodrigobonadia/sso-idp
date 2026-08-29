@@ -42,6 +42,11 @@ import org.springframework.web.util.UriComponentsBuilder;
  * InvalidRedirectUriException}) mean there is no confirmed-trustworthy redirect target at all, so
  * the resource owner sees a rendered error page instead - never a redirect built from unvalidated
  * input.
+ *
+ * <p>{@code nonce} (OpenID Connect Core 1.0 §3.1.2.1) is accepted but never validated here or by
+ * {@link AuthorizeUseCase} - it is only captured onto the issued authorization code so that {@code
+ * POST /token} (Phase 3.4) can echo it back as the {@code id_token} {@code nonce} claim. RECOMMENDED
+ * but not REQUIRED for this grant, so it is {@code required = false}.
  */
 @Controller
 public class AuthorizeController {
@@ -63,6 +68,7 @@ public class AuthorizeController {
             @RequestParam(value = "state", required = false) String state,
             @RequestParam("code_challenge") String codeChallenge,
             @RequestParam("code_challenge_method") String codeChallengeMethod,
+            @RequestParam(value = "nonce", required = false) String nonce,
             @AuthenticationPrincipal SsoAuthenticatedPrincipal principal,
             Model model) {
         TenantSummary tenant = tenantContext.tenant().orElseThrow(TenantRequiredException::new);
@@ -76,7 +82,8 @@ public class AuthorizeController {
                 scope,
                 state,
                 codeChallenge,
-                codeChallengeMethod);
+                codeChallengeMethod,
+                nonce);
 
         try {
             AuthorizeResult result = authorizeUseCase.execute(command);

@@ -85,6 +85,10 @@ class AuthorizationCodeRepositoryAdapterIT {
     }
 
     private AuthorizationCode newCode() {
+        return newCode(null);
+    }
+
+    private AuthorizationCode newCode(String nonce) {
         return AuthorizationCode.issue(
                 tenant.id(),
                 client.id(),
@@ -93,6 +97,7 @@ class AuthorizationCodeRepositoryAdapterIT {
                 RedirectUri.of("https://app.example.com/callback"),
                 Set.of("openid", "profile"),
                 CodeChallenge.of("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"),
+                nonce,
                 Instant.now(),
                 Duration.ofMinutes(5));
     }
@@ -113,7 +118,19 @@ class AuthorizationCodeRepositoryAdapterIT {
         assertThat(reloaded.get().scopes()).containsExactlyInAnyOrder("openid", "profile");
         assertThat(reloaded.get().codeChallenge())
                 .isEqualTo(CodeChallenge.of("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"));
+        assertThat(reloaded.get().nonce()).isNull();
         assertThat(reloaded.get().isConsumed()).isFalse();
+    }
+
+    @Test
+    void savesAndReloadsACodeWithANonce() {
+        AuthorizationCode code = newCode("round-trip-nonce");
+
+        authorizationCodeRepository.save(code);
+        Optional<AuthorizationCode> reloaded = authorizationCodeRepository.findByCodeHash(code.codeHash());
+
+        assertThat(reloaded).isPresent();
+        assertThat(reloaded.get().nonce()).isEqualTo("round-trip-nonce");
     }
 
     @Test

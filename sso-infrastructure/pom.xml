@@ -35,6 +35,13 @@
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-crypto</artifactId>
         </dependency>
+        <!-- Needed by RsaJwtSignerAdapter to serialize JWT header/claims maps to JSON before
+             Base64url-encoding them (Phase 3.4) - not a JWT library, see that adapter's Javadoc.
+             Version is managed by the Spring Boot BOM imported in the parent POM. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>

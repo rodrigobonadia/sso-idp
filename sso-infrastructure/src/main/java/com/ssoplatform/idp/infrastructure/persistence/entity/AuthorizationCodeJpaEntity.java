@@ -16,6 +16,9 @@ import java.util.UUID;
  * {@code OAuthClientJpaEntity} documents for its own scope/grant-type columns - a code's scopes are
  * only ever read back whole (never queried by an individual scope value), so a join table would add
  * nothing here.
+ *
+ * <p>{@code nonce} is nullable (added by {@code V8__add_nonce_to_authorization_codes_table.sql},
+ * Phase 3.4) - see {@code AuthorizationCode}'s Javadoc for why it is optional.
  */
 @Entity
 @Table(name = "authorization_codes")
@@ -45,6 +48,9 @@ public class AuthorizationCodeJpaEntity {
     @Column(name = "code_challenge", nullable = false, length = 128)
     private String codeChallenge;
 
+    @Column(name = "nonce")
+    private String nonce;
+
     @Column(name = "expires_at", nullable = false)
     private Instant expiresAt;
 
@@ -67,6 +73,7 @@ public class AuthorizationCodeJpaEntity {
             String redirectUri,
             String scopes,
             String codeChallenge,
+            String nonce,
             Instant expiresAt,
             Instant consumedAt,
             Instant createdAt) {
@@ -78,6 +85,7 @@ public class AuthorizationCodeJpaEntity {
         this.redirectUri = redirectUri;
         this.scopes = scopes;
         this.codeChallenge = codeChallenge;
+        this.nonce = nonce;
         this.expiresAt = expiresAt;
         this.consumedAt = consumedAt;
         this.createdAt = createdAt;
@@ -113,6 +121,10 @@ public class AuthorizationCodeJpaEntity {
 
     public String getCodeChallenge() {
         return codeChallenge;
+    }
+
+    public String getNonce() {
+        return nonce;
     }
 
     public Instant getExpiresAt() {

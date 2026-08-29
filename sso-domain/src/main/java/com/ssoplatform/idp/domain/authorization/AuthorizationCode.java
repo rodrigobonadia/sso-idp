@@ -14,8 +14,7 @@ import java.util.Set;
 
 /**
  * A single-use, short-lived authorization code issued by {@code GET /authorize} (Phase 3.3) and
- * redeemed by {@code POST /token} (Phase 3.4, not yet built) for an Authorization Code + PKCE
- * grant.
+ * redeemed by {@code POST /token} (Phase 3.4) for an Authorization Code + PKCE grant.
  *
  * <p>Reuses {@link TokenHash} and the consumption exceptions ({@link
  * VerificationTokenAlreadyConsumedException}, {@link VerificationTokenExpiredException}) from
@@ -30,9 +29,17 @@ import java.util.Set;
  * time, not re-derived later: {@link #redirectUri} must be compared for an EXACT match against the
  * {@code redirect_uri} presented at redemption (RFC 6749 §4.1.3 - a code issued for one redirect
  * URI must never be redeemable against a different one, even a different URI registered to the
- * same client), and {@link #codeChallenge} is what {@code /token} will compare a SHA-256 hash of
- * the caller-supplied {@code code_verifier} against (see {@link CodeChallenge}'s Javadoc for why no
+ * same client), and {@link #codeChallenge} is what {@code /token} compares a SHA-256 hash of the
+ * caller-supplied {@code code_verifier} against (see {@link CodeChallenge}'s Javadoc for why no
  * "method" field exists - it is always S256).
+ *
+ * <p>{@link #nonce} is the optional OIDC {@code nonce} value (OpenID Connect Core 1.0 §3.1.2.1),
+ * captured verbatim from {@code GET /authorize} and echoed back unchanged as the {@code id_token}
+ * {@code nonce} claim by {@code /token} - never validated or interpreted by this entity, only
+ * carried through, exactly like {@link #state} is carried through by {@code AuthorizeResult}
+ * rather than by this entity. Nullable because {@code nonce} is RECOMMENDED, not REQUIRED, for the
+ * Authorization Code flow (unlike Implicit/Hybrid flow, where OIDC Core mandates it) - a request
+ * that omits it still gets a valid code, just with no nonce to echo back at redemption.
  */
 public final class AuthorizationCode {
 
@@ -44,6 +51,7 @@ public final class AuthorizationCode {
     private final RedirectUri redirectUri;
     private final Set<String> scopes;
     private final CodeChallenge codeChallenge;
+    private final String nonce;
     private final Instant expiresAt;
     private Instant consumedAt;
     private final Instant createdAt;
@@ -57,6 +65,7 @@ public final class AuthorizationCode {
             RedirectUri redirectUri,
             Set<String> scopes,
             CodeChallenge codeChallenge,
+            String nonce,
             Instant expiresAt,
             Instant consumedAt,
             Instant createdAt) {
@@ -68,12 +77,14 @@ public final class AuthorizationCode {
         this.redirectUri = redirectUri;
         this.scopes = scopes;
         this.codeChallenge = codeChallenge;
+        this.nonce = nonce;
         this.expiresAt = expiresAt;
         this.consumedAt = consumedAt;
         this.createdAt = createdAt;
     }
 
-    /** Issues a brand-new, unconsumed code, valid from {@code now} for {@code validity}. */
+    /** Issues a brand-new, unconsumed code, valid from {@code now} for {@code validity}. {@code
+     * nonce} may be {@code null} - see the class Javadoc for why. */
     public static AuthorizationCode issue(
             TenantId tenantId,
             OAuthClientId oauthClientId,
@@ -82,6 +93,7 @@ public final class AuthorizationCode {
             RedirectUri redirectUri,
             Set<String> scopes,
             CodeChallenge codeChallenge,
+            String nonce,
             Instant now,
             Duration validity) {
         Objects.requireNonNull(tenantId, "tenantId must not be null");
@@ -105,6 +117,7 @@ public final class AuthorizationCode {
                 redirectUri,
                 Set.copyOf(scopes),
                 codeChallenge,
+                nonce,
                 now.plus(validity),
                 null,
                 now);
@@ -120,6 +133,7 @@ public final class AuthorizationCode {
             RedirectUri redirectUri,
             Set<String> scopes,
             CodeChallenge codeChallenge,
+            String nonce,
             Instant expiresAt,
             Instant consumedAt,
             Instant createdAt) {
@@ -142,17 +156,16 @@ public final class AuthorizationCode {
                 redirectUri,
                 Set.copyOf(scopes),
                 codeChallenge,
+                nonce,
                 expiresAt,
                 consumedAt,
                 createdAt);
     }
 
     /**
-     * Marks the code as redeemed. Not called by any use case in Phase 3.3 (this sub-phase only
-     * ISSUES codes) - included now so the entity's full lifecycle is already modeled for {@code
-     * /token} (Phase 3.4) to call without any shape change, exactly like {@link
-     * com.ssoplatform.idp.domain.oauth.OAuthClientRepository#save} was added in Phase 3.1 ahead of
-     * its first real caller.
+     * Marks the code as redeemed. Called by {@code TokenUseCase} (Phase 3.4) exactly once per
+     * code - a second call, or a call after expiry, throws instead of silently succeeding, which
+     * is what makes this the single-use enforcement point for the whole grant.
      */
     public void consume(Instant now) {
         Objects.requireNonNull(now, "now must not be null");
@@ -203,6 +216,11 @@ public final class AuthorizationCode {
 
     public CodeChallenge codeChallenge() {
         return codeChallenge;
+    }
+
+    /** The OIDC nonce captured at {@code /authorize} time, or {@code null} if none was supplied. */
+    public String nonce() {
+        return nonce;
     }
 
     public Instant expiresAt() {

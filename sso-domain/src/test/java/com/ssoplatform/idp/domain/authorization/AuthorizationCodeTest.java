@@ -27,8 +27,12 @@ class AuthorizationCodeTest {
     private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
 
     private static AuthorizationCode issue() {
+        return issue(null);
+    }
+
+    private static AuthorizationCode issue(String nonce) {
         return AuthorizationCode.issue(
-                TENANT_ID, CLIENT_ID, USER_ID, CODE_HASH, REDIRECT_URI, SCOPES, CODE_CHALLENGE, NOW, Duration.ofMinutes(5));
+                TENANT_ID, CLIENT_ID, USER_ID, CODE_HASH, REDIRECT_URI, SCOPES, CODE_CHALLENGE, nonce, NOW, Duration.ofMinutes(5));
     }
 
     @Test
@@ -42,15 +46,24 @@ class AuthorizationCodeTest {
         assertThat(code.redirectUri()).isEqualTo(REDIRECT_URI);
         assertThat(code.scopes()).isEqualTo(SCOPES);
         assertThat(code.codeChallenge()).isEqualTo(CODE_CHALLENGE);
+        assertThat(code.nonce()).isNull();
         assertThat(code.expiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(5)));
         assertThat(code.createdAt()).isEqualTo(NOW);
         assertThat(code.isConsumed()).isFalse();
     }
 
     @Test
+    void issuingCarriesANonceWhenSupplied() {
+        AuthorizationCode code = issue("some-nonce-value");
+
+        assertThat(code.nonce()).isEqualTo("some-nonce-value");
+    }
+
+    @Test
     void issuingRejectsEmptyScopes() {
         assertThatThrownBy(() -> AuthorizationCode.issue(
-                        TENANT_ID, CLIENT_ID, USER_ID, CODE_HASH, REDIRECT_URI, Set.of(), CODE_CHALLENGE, NOW, Duration.ofMinutes(5)))
+                        TENANT_ID, CLIENT_ID, USER_ID, CODE_HASH, REDIRECT_URI, Set.of(), CODE_CHALLENGE, null, NOW,
+                        Duration.ofMinutes(5)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -96,9 +109,11 @@ class AuthorizationCodeTest {
         Instant consumedAt = NOW.plusSeconds(5);
 
         AuthorizationCode code = AuthorizationCode.reconstitute(
-                id, TENANT_ID, CLIENT_ID, USER_ID, CODE_HASH, REDIRECT_URI, SCOPES, CODE_CHALLENGE, expiresAt, consumedAt, NOW);
+                id, TENANT_ID, CLIENT_ID, USER_ID, CODE_HASH, REDIRECT_URI, SCOPES, CODE_CHALLENGE, "reconstituted-nonce",
+                expiresAt, consumedAt, NOW);
 
         assertThat(code.id()).isEqualTo(id);
+        assertThat(code.nonce()).isEqualTo("reconstituted-nonce");
         assertThat(code.isConsumed()).isTrue();
         assertThat(code.expiresAt()).isEqualTo(expiresAt);
     }
@@ -115,6 +130,7 @@ class AuthorizationCodeTest {
                 code.redirectUri(),
                 code.scopes(),
                 code.codeChallenge(),
+                code.nonce(),
                 code.expiresAt(),
                 null,
                 code.createdAt());

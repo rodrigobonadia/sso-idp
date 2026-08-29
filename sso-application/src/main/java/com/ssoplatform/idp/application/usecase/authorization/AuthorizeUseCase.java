@@ -50,6 +50,10 @@ import java.util.stream.Collectors;
  *
  * <p>Only {@code code_challenge_method=S256} is ever accepted - see {@link CodeChallenge}'s Javadoc
  * for why {@code plain} is rejected outright rather than modeled at all.
+ *
+ * <p>{@code command.nonce()} is never validated - it is simply threaded through onto the issued
+ * {@link AuthorizationCode} unchanged (see that entity's Javadoc), to be echoed back as the {@code
+ * id_token} {@code nonce} claim by {@code /token} (Phase 3.4) if present.
  */
 public class AuthorizeUseCase {
 
@@ -136,7 +140,16 @@ public class AuthorizeUseCase {
 
         Instant now = Instant.now();
         AuthorizationCode authorizationCode = AuthorizationCode.issue(
-                tenantId, client.id(), userId, codeHash, redirectUri, requestedScopes, codeChallenge, now, CODE_VALIDITY);
+                tenantId,
+                client.id(),
+                userId,
+                codeHash,
+                redirectUri,
+                requestedScopes,
+                codeChallenge,
+                command.nonce(),
+                now,
+                CODE_VALIDITY);
         authorizationCodeRepository.save(authorizationCode);
 
         return new AuthorizeResult(rawCode.value(), redirectUri.value(), command.state());

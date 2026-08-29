@@ -71,6 +71,10 @@ class AuthorizeUseCaseTest {
     }
 
     private static AuthorizeCommand validCommand() {
+        return validCommand(null);
+    }
+
+    private static AuthorizeCommand validCommand(String nonce) {
         return new AuthorizeCommand(
                 TENANT_ID.value(),
                 USER_ID.value(),
@@ -80,7 +84,8 @@ class AuthorizeUseCaseTest {
                 "openid profile",
                 "xyz-state",
                 CODE_CHALLENGE,
-                "S256");
+                "S256",
+                nonce);
     }
 
     @Test
@@ -116,7 +121,8 @@ class AuthorizeUseCaseTest {
                 "openid",
                 null,
                 CODE_CHALLENGE,
-                "S256");
+                "S256",
+                null);
 
         AuthorizeResult result = useCase.execute(command);
 
@@ -124,9 +130,40 @@ class AuthorizeUseCaseTest {
     }
 
     @Test
+    void threadsANonceOntoTheIssuedCodeWhenSupplied() {
+        OAuthClient client = activeClient();
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(TokenHash.of("hashed-code"));
+        when(authorizationCodeRepository.save(any(AuthorizationCode.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        useCase.execute(validCommand("abc123-nonce"));
+
+        var captor = org.mockito.ArgumentCaptor.forClass(AuthorizationCode.class);
+        verify(authorizationCodeRepository).save(captor.capture());
+        assertThat(captor.getValue().nonce()).isEqualTo("abc123-nonce");
+    }
+
+    @Test
+    void issuesACodeWithANullNonceWhenNoneIsSupplied() {
+        OAuthClient client = activeClient();
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(TokenHash.of("hashed-code"));
+        when(authorizationCodeRepository.save(any(AuthorizationCode.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        useCase.execute(validCommand());
+
+        var captor = org.mockito.ArgumentCaptor.forClass(AuthorizationCode.class);
+        verify(authorizationCodeRepository).save(captor.capture());
+        assertThat(captor.getValue().nonce()).isNull();
+    }
+
+    @Test
     void rejectsAMalformedClientIdWithoutTouchingTheRepository() {
         AuthorizeCommand command = new AuthorizeCommand(
-                TENANT_ID.value(), USER_ID.value(), "!!", REDIRECT_URI_VALUE, "code", "openid", null, CODE_CHALLENGE, "S256");
+                TENANT_ID.value(), USER_ID.value(), "!!", REDIRECT_URI_VALUE, "code", "openid", null, CODE_CHALLENGE,
+                "S256", null);
 
         assertThatThrownBy(() -> useCase.execute(command)).isInstanceOf(InvalidClientIdException.class);
         verify(oauthClientRepository, never()).findByClientId(any());
@@ -162,7 +199,8 @@ class AuthorizeUseCaseTest {
         when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
 
         AuthorizeCommand command = new AuthorizeCommand(
-                TENANT_ID.value(), USER_ID.value(), CLIENT_ID_VALUE, "not a uri", "code", "openid", null, CODE_CHALLENGE, "S256");
+                TENANT_ID.value(), USER_ID.value(), CLIENT_ID_VALUE, "not a uri", "code", "openid", null, CODE_CHALLENGE,
+                "S256", null);
 
         assertThatThrownBy(() -> useCase.execute(command)).isInstanceOf(InvalidRedirectUriException.class);
     }
@@ -181,7 +219,8 @@ class AuthorizeUseCaseTest {
                 "openid",
                 null,
                 CODE_CHALLENGE,
-                "S256");
+                "S256",
+                null);
 
         assertThatThrownBy(() -> useCase.execute(command)).isInstanceOf(RedirectUriNotRegisteredException.class);
     }
@@ -212,7 +251,8 @@ class AuthorizeUseCaseTest {
                 "openid",
                 null,
                 CODE_CHALLENGE,
-                "S256");
+                "S256",
+                null);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthAuthorizationException.class)
@@ -244,7 +284,8 @@ class AuthorizeUseCaseTest {
         when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
 
         AuthorizeCommand command = new AuthorizeCommand(
-                TENANT_ID.value(), USER_ID.value(), CLIENT_ID_VALUE, REDIRECT_URI_VALUE, "code", "  ", null, CODE_CHALLENGE, "S256");
+                TENANT_ID.value(), USER_ID.value(), CLIENT_ID_VALUE, REDIRECT_URI_VALUE, "code", "  ", null, CODE_CHALLENGE,
+                "S256", null);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthAuthorizationException.class)
@@ -258,7 +299,8 @@ class AuthorizeUseCaseTest {
         when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
 
         AuthorizeCommand command = new AuthorizeCommand(
-                TENANT_ID.value(), USER_ID.value(), CLIENT_ID_VALUE, REDIRECT_URI_VALUE, "code", "email", null, CODE_CHALLENGE, "S256");
+                TENANT_ID.value(), USER_ID.value(), CLIENT_ID_VALUE, REDIRECT_URI_VALUE, "code", "email", null, CODE_CHALLENGE,
+                "S256", null);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthAuthorizationException.class)
@@ -280,7 +322,8 @@ class AuthorizeUseCaseTest {
                 "openid",
                 null,
                 CODE_CHALLENGE,
-                "plain");
+                "plain",
+                null);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthAuthorizationException.class)
@@ -294,7 +337,8 @@ class AuthorizeUseCaseTest {
         when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
 
         AuthorizeCommand command = new AuthorizeCommand(
-                TENANT_ID.value(), USER_ID.value(), CLIENT_ID_VALUE, REDIRECT_URI_VALUE, "code", "openid", null, "too-short", "S256");
+                TENANT_ID.value(), USER_ID.value(), CLIENT_ID_VALUE, REDIRECT_URI_VALUE, "code", "openid", null, "too-short",
+                "S256", null);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthAuthorizationException.class)

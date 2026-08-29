@@ -93,6 +93,21 @@ import org.springframework.security.web.util.matcher.AnyRequestMatcher;
  * which is NOT listed here and so falls under the default {@code anyRequest().authenticated()}
  * rule (any logged-in session in the tenant may call it for now - see
  * {@code architecture_decisions.md} for why no stronger, admin-specific protection exists yet).
+ *
+ * <p>{@code /token} (Phase 3.4) is permitted unauthenticated for the same underlying reason
+ * {@code /login} and {@code /register} are: there is no Spring Security session to require in the
+ * first place, since the caller being authenticated here is the OAuth CLIENT (via hand-parsed HTTP
+ * Basic inside {@code TokenController}/{@code TokenUseCase}), not a resource-owner session.
+ *
+ * <p>{@code /token} is also the one path excluded from CSRF protection (see {@code
+ * ignoringRequestMatchers} below) - CSRF protection exists to stop a malicious page from riding a
+ * victim's BROWSER COOKIES into a state-changing request the victim never intended; a real OAuth
+ * client calling {@code /token} is a server-to-server HTTP call that carries no browser session
+ * cookie at all and authenticates purely via the {@code Authorization} header it explicitly
+ * constructs, so it can never present a CSRF token a browser-based flow would have - requiring one
+ * would make this endpoint unusable by every real OAuth client, and there is no cookie-riding
+ * attack for the exemption to reopen. This mirrors how every real OAuth2/OIDC server (Spring
+ * Authorization Server included) exempts its token endpoint from CSRF for the same reason.
  */
 @Configuration
 @EnableWebSecurity
@@ -101,7 +116,8 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http.csrf(csrf -> csrf.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
-                        .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler()))
+                        .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
+                        .ignoringRequestMatchers("/token"))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(
                                 "/actuator/**",
@@ -113,6 +129,7 @@ public class SecurityConfig {
                                 "/forgot-password",
                                 "/forgot-password/**",
                                 "/reset-password",
+                                "/token",
                                 "/api/register",
                                 "/api/verify-email",
                                 "/api/login",

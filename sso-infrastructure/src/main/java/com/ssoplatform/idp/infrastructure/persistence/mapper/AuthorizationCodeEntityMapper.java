@@ -29,6 +29,7 @@ public final class AuthorizationCodeEntityMapper {
                 code.redirectUri().value(),
                 String.join(",", code.scopes()),
                 code.codeChallenge().value(),
+                code.nonce(),
                 code.expiresAt(),
                 code.consumedAt(),
                 code.createdAt());
@@ -44,6 +45,7 @@ public final class AuthorizationCodeEntityMapper {
                 RedirectUri.of(entity.getRedirectUri()),
                 parseScopes(entity.getScopes()),
                 CodeChallenge.of(entity.getCodeChallenge()),
+                entity.getNonce(),
                 entity.getExpiresAt(),
                 entity.getConsumedAt(),
                 entity.getCreatedAt());
