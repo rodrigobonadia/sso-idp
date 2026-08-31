@@ -9,6 +9,7 @@ import com.ssoplatform.idp.application.port.out.OAuthClientRepository;
 import com.ssoplatform.idp.application.port.out.PasswordHasher;
 import com.ssoplatform.idp.application.port.out.PasswordResetTokenRepository;
 import com.ssoplatform.idp.application.port.out.PrivateKeyEncryptor;
+import com.ssoplatform.idp.application.port.out.RefreshTokenRepository;
 import com.ssoplatform.idp.application.port.out.SigningKeyPairGenerator;
 import com.ssoplatform.idp.application.port.out.SigningKeyRepository;
 import com.ssoplatform.idp.application.port.out.TenantRepository;
@@ -136,6 +137,7 @@ public class UseCaseConfiguration {
             OAuthClientRepository oauthClientRepository,
             ClientSecretHasher clientSecretHasher,
             AuthorizationCodeRepository authorizationCodeRepository,
+            RefreshTokenRepository refreshTokenRepository,
             VerificationTokenHasher verificationTokenHasher,
             CodeVerifierValidator codeVerifierValidator,
             SigningKeyRepository signingKeyRepository,
@@ -145,6 +147,7 @@ public class UseCaseConfiguration {
                 oauthClientRepository,
                 clientSecretHasher,
                 authorizationCodeRepository,
+                refreshTokenRepository,
                 verificationTokenHasher,
                 codeVerifierValidator,
                 signingKeyRepository,

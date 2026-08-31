@@ -19,8 +19,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * {@code POST /token}: the OAuth2/OIDC token endpoint for the Authorization Code + PKCE grant
- * (RFC 6749 §4.1.3). Deliberately {@code permitAll} in {@code SecurityConfig}, exactly like {@code
+ * {@code POST /token}: the OAuth2/OIDC token endpoint, handling both the Authorization Code +
+ * PKCE grant (RFC 6749 §4.1.3) and the Refresh Token grant (RFC 6749 §6) - see {@code
+ * TokenUseCase}'s Javadoc for how the two are dispatched and how a new refresh token ends up on
+ * this response. Deliberately {@code permitAll} in {@code SecurityConfig}, exactly like {@code
  * /.well-known/jwks.json} - this endpoint authenticates the CLIENT itself via HTTP Basic (parsed by
  * hand below, not via Spring Security's own {@code httpBasic()} DSL, matching how every other
  * authentication surface in this project hand-authenticates through a use case rather than a
@@ -74,7 +76,8 @@ public class TokenController {
             @RequestParam(value = "grant_type", required = false) String grantType,
             @RequestParam(value = "code", required = false) String code,
             @RequestParam(value = "redirect_uri", required = false) String redirectUri,
-            @RequestParam(value = "code_verifier", required = false) String codeVerifier) {
+            @RequestParam(value = "code_verifier", required = false) String codeVerifier,
+            @RequestParam(value = "refresh_token", required = false) String refreshToken) {
         TenantSummary tenant = tenantContext.tenant().orElseThrow(TenantRequiredException::new);
         String[] clientCredentials = parseBasicAuth(authorizationHeader);
 
@@ -85,6 +88,7 @@ public class TokenController {
                 code,
                 redirectUri,
                 codeVerifier,
+                refreshToken,
                 clientCredentials == null ? null : clientCredentials[0],
                 clientCredentials == null ? null : clientCredentials[1]);
 
@@ -93,7 +97,12 @@ public class TokenController {
             return ResponseEntity.ok()
                     .header(HttpHeaders.CACHE_CONTROL, "no-store")
                     .header(HttpHeaders.PRAGMA, "no-cache")
-                    .body(new TokenResponse(result.accessToken(), "Bearer", result.expiresInSeconds(), result.idToken()));
+                    .body(new TokenResponse(
+                            result.accessToken(),
+                            "Bearer",
+                            result.expiresInSeconds(),
+                            result.idToken(),
+                            result.refreshToken()));
         } catch (OAuthTokenException ex) {
             return errorResponse(ex);
         }

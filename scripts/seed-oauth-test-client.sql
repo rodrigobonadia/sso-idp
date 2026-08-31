@@ -36,3 +36,17 @@ VALUES (
     'ACTIVE',
     now()
 );
+
+-- Phase 3.6: to manually exercise the Refresh Token grant (rotation + reuse detection) against
+-- this same acme-test-app client, run the UPDATE below once to add the offline_access scope and
+-- the REFRESH_TOKEN grant type to its already-seeded row - this does NOT change the client_id or
+-- client_secret above, so the same credentials keep working for every existing manual test:
+--
+--   Get-Content scripts\enable-refresh-token-for-test-client.sql | docker compose exec -T postgres psql -U sso -d sso
+--
+-- (or paste the statement directly into `docker compose exec postgres psql -U sso -d sso`).
+--
+-- UPDATE oauth_clients
+-- SET allowed_scopes = 'openid,profile,email,offline_access',
+--     allowed_grant_types = 'AUTHORIZATION_CODE,REFRESH_TOKEN'
+-- WHERE client_id = 'acme-test-app';

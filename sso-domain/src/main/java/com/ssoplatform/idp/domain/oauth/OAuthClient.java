@@ -30,7 +30,7 @@ import java.util.Set;
 public final class OAuthClient {
 
     /** The only scopes the platform recognizes at all, regardless of what any client is allowed. */
-    public static final Set<String> SUPPORTED_SCOPES = Set.of("openid", "profile", "email");
+    public static final Set<String> SUPPORTED_SCOPES = Set.of("openid", "profile", "email", "offline_access");
 
     private final OAuthClientId id;
     private final TenantId tenantId;

@@ -7,6 +7,7 @@ import com.ssoplatform.idp.application.port.out.CodeVerifierValidator;
 import com.ssoplatform.idp.application.port.out.JwtSigner;
 import com.ssoplatform.idp.application.port.out.OAuthClientRepository;
 import com.ssoplatform.idp.application.port.out.PrivateKeyEncryptor;
+import com.ssoplatform.idp.application.port.out.RefreshTokenRepository;
 import com.ssoplatform.idp.application.port.out.SigningKeyRepository;
 import com.ssoplatform.idp.application.port.out.VerificationTokenHasher;
 import com.ssoplatform.idp.domain.authorization.AuthorizationCode;
@@ -16,8 +17,12 @@ import com.ssoplatform.idp.domain.oauth.InvalidClientIdException;
 import com.ssoplatform.idp.domain.oauth.InvalidRedirectUriException;
 import com.ssoplatform.idp.domain.oauth.OAuthClient;
 import com.ssoplatform.idp.domain.oauth.RedirectUri;
+import com.ssoplatform.idp.domain.refreshtoken.RefreshToken;
+import com.ssoplatform.idp.domain.refreshtoken.RefreshTokenFamilyId;
+import com.ssoplatform.idp.domain.refreshtoken.RefreshTokenReusedException;
 import com.ssoplatform.idp.domain.signingkey.SigningKey;
 import com.ssoplatform.idp.domain.tenant.TenantId;
+import com.ssoplatform.idp.domain.user.UserId;
 import com.ssoplatform.idp.domain.verification.InvalidVerificationTokenException;
 import com.ssoplatform.idp.domain.verification.RawVerificationToken;
 import com.ssoplatform.idp.domain.verification.TokenHash;
@@ -28,23 +33,36 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /**
- * Handles a {@code POST /token} request for the {@code authorization_code} grant (RFC 6749
- * §4.1.3), the redemption half of the flow {@code AuthorizeUseCase} begins. On success, issues a
- * freshly signed access token (JWT, RFC 9068 claim shape) and, when the redeemed code carried the
- * {@code openid} scope, an ID token (OpenID Connect Core 1.0 §2) - both signed with the tenant's
- * current {@code SigningKey} via {@link JwtSigner}, exactly like {@code JwksController} publishes
- * that same key's public half.
+ * Handles a {@code POST /token} request for either grant this platform implements:
+ *
+ * <ul>
+ *   <li>{@code authorization_code} (RFC 6749 §4.1.3), the redemption half of the flow {@code
+ *       AuthorizeUseCase} begins - see {@link #executeAuthorizationCodeGrant}.
+ *   <li>{@code refresh_token} (RFC 6749 §6), which rotates a previously-issued {@link
+ *       RefreshToken} forward one step in its family - see {@link #executeRefreshTokenGrant}.
+ * </ul>
+ *
+ * On success, either grant issues a freshly signed access token (JWT, RFC 9068 claim shape) and,
+ * when the relevant scopes include {@code openid}, an ID token (OpenID Connect Core 1.0 §2) - both
+ * signed with the tenant's current {@code SigningKey} via {@link JwtSigner}, exactly like {@code
+ * JwksController} publishes that same key's public half. The {@code authorization_code} grant
+ * additionally issues a brand-new refresh token - starting a fresh rotation family (see {@link
+ * RefreshToken#issueFirst}) - whenever the redeemed code carried the {@code offline_access} scope
+ * AND the client is authorized for the {@code refresh_token} grant; the {@code refresh_token} grant
+ * always issues one (continuing the family - see {@link RefreshToken#continueFamily}), since a
+ * successful rotation is exactly what replaces the token just consumed.
  *
  * <p>Validation runs in a fixed order, and - unlike {@code AuthorizeUseCase} - EVERY failure from
  * every step throws {@link OAuthTokenException}: RFC 6749 §5.2 never redirects a token error back
  * anywhere, so there is no "before/after a trusted redirect target" split to preserve here.
  *
+ * <p>For the {@code authorization_code} grant:
+ *
  * <ol>
- *   <li><b>grant_type</b> must be {@code authorization_code} - the only grant this platform
- *       implements so far.
  *   <li><b>client authentication</b> (HTTP Basic, the only method this platform accepts) must
  *       succeed against a real, active, correctly-scoped client that is authorized for this grant
  *       type - see {@link #authenticateClient}.
@@ -61,18 +79,33 @@ import java.util.UUID;
  * check has already passed - never as a side effect of a failed validation - so a legitimate client
  * that failed one check (e.g. a transient client-side bug in the {@code code_verifier} it sent) can
  * still retry with the same code before it expires.
+ *
+ * <p>For the {@code refresh_token} grant, presenting a token that has already been rotated or
+ * revoked is treated as a theft signal (see {@link RefreshTokenReusedException}) rather than an
+ * ordinary error: {@link #executeRefreshTokenGrant} responds by revoking every token that shares
+ * that family (see {@link #revokeEntireFamily}), forcing the resource owner to re-authenticate
+ * from scratch, and only then reports {@code invalid_grant} - never anything more specific, for
+ * the same enumeration-safety reason RFC 6749 §5.2 errors never distinguish sub-cases elsewhere in
+ * this class.
  */
 public class TokenUseCase {
 
     static final Duration ACCESS_TOKEN_VALIDITY = Duration.ofMinutes(15);
     static final Duration ID_TOKEN_VALIDITY = Duration.ofMinutes(15);
 
-    private static final String SUPPORTED_GRANT_TYPE = "authorization_code";
+    /** Fixed absolute validity of an entire refresh token rotation family (see {@code
+     * RefreshToken}'s Javadoc) - never extended or "renewed" by rotation. */
+    static final Duration REFRESH_TOKEN_FAMILY_VALIDITY = Duration.ofDays(30);
+
+    private static final String GRANT_TYPE_AUTHORIZATION_CODE = "authorization_code";
+    private static final String GRANT_TYPE_REFRESH_TOKEN = "refresh_token";
     private static final String OPENID_SCOPE = "openid";
+    private static final String OFFLINE_ACCESS_SCOPE = "offline_access";
 
     private final OAuthClientRepository oauthClientRepository;
     private final ClientSecretHasher clientSecretHasher;
     private final AuthorizationCodeRepository authorizationCodeRepository;
+    private final RefreshTokenRepository refreshTokenRepository;
     private final VerificationTokenHasher verificationTokenHasher;
     private final CodeVerifierValidator codeVerifierValidator;
     private final SigningKeyRepository signingKeyRepository;
@@ -83,6 +116,7 @@ public class TokenUseCase {
             OAuthClientRepository oauthClientRepository,
             ClientSecretHasher clientSecretHasher,
             AuthorizationCodeRepository authorizationCodeRepository,
+            RefreshTokenRepository refreshTokenRepository,
             VerificationTokenHasher verificationTokenHasher,
             CodeVerifierValidator codeVerifierValidator,
             SigningKeyRepository signingKeyRepository,
@@ -93,6 +127,8 @@ public class TokenUseCase {
         this.clientSecretHasher = Objects.requireNonNull(clientSecretHasher, "clientSecretHasher must not be null");
         this.authorizationCodeRepository =
                 Objects.requireNonNull(authorizationCodeRepository, "authorizationCodeRepository must not be null");
+        this.refreshTokenRepository =
+                Objects.requireNonNull(refreshTokenRepository, "refreshTokenRepository must not be null");
         this.verificationTokenHasher =
                 Objects.requireNonNull(verificationTokenHasher, "verificationTokenHasher must not be null");
         this.codeVerifierValidator =
@@ -107,11 +143,19 @@ public class TokenUseCase {
         Objects.requireNonNull(command, "command must not be null");
         TenantId tenantId = TenantId.of(command.tenantId());
 
-        if (!SUPPORTED_GRANT_TYPE.equals(command.grantType())) {
-            throw new OAuthTokenException("unsupported_grant_type", "Only grant_type=authorization_code is supported");
+        if (GRANT_TYPE_AUTHORIZATION_CODE.equals(command.grantType())) {
+            return executeAuthorizationCodeGrant(command, tenantId);
         }
+        if (GRANT_TYPE_REFRESH_TOKEN.equals(command.grantType())) {
+            return executeRefreshTokenGrant(command, tenantId);
+        }
+        throw new OAuthTokenException(
+                "unsupported_grant_type",
+                "Only grant_type=authorization_code or grant_type=refresh_token is supported");
+    }
 
-        OAuthClient client = authenticateClient(command, tenantId);
+    private TokenResult executeAuthorizationCodeGrant(TokenCommand command, TenantId tenantId) {
+        OAuthClient client = authenticateClient(command, tenantId, GrantType.AUTHORIZATION_CODE);
 
         if (isBlank(command.code())) {
             throw new OAuthTokenException("invalid_request", "code must not be blank");
@@ -133,19 +177,120 @@ public class TokenUseCase {
         }
         authorizationCodeRepository.save(authorizationCode);
 
-        SigningKey signingKey = signingKeyRepository
-                .findCurrentByTenantId(tenantId)
-                .orElseThrow(() -> new IllegalStateException("No current signing key found for tenant " + tenantId));
+        SigningKey signingKey = currentSigningKey(tenantId);
         byte[] privateKeyDer = privateKeyEncryptor.decrypt(signingKey.encryptedPrivateKey());
 
-        String accessToken = buildAccessToken(command, client, authorizationCode, signingKey, privateKeyDer, now);
+        String accessToken = buildAccessToken(
+                command.issuer(),
+                client,
+                authorizationCode.userId(),
+                authorizationCode.scopes(),
+                signingKey,
+                privateKeyDer,
+                now);
 
         String idToken = null;
         if (authorizationCode.scopes().contains(OPENID_SCOPE)) {
-            idToken = buildIdToken(command, client, authorizationCode, signingKey, privateKeyDer, now);
+            idToken = buildIdToken(
+                    command.issuer(),
+                    client,
+                    authorizationCode.userId(),
+                    signingKey,
+                    privateKeyDer,
+                    now,
+                    authorizationCode.nonce());
         }
 
-        return new TokenResult(accessToken, ACCESS_TOKEN_VALIDITY.toSeconds(), idToken);
+        String rawRefreshToken = null;
+        if (authorizationCode.scopes().contains(OFFLINE_ACCESS_SCOPE)
+                && client.supportsGrantType(GrantType.REFRESH_TOKEN)) {
+            RawVerificationToken rawToken = RawVerificationToken.generate();
+            TokenHash tokenHash = verificationTokenHasher.hash(rawToken);
+            RefreshToken refreshToken = RefreshToken.issueFirst(
+                    tenantId,
+                    client.id(),
+                    authorizationCode.userId(),
+                    tokenHash,
+                    authorizationCode.scopes(),
+                    now,
+                    REFRESH_TOKEN_FAMILY_VALIDITY);
+            refreshTokenRepository.save(refreshToken);
+            rawRefreshToken = rawToken.value();
+        }
+
+        return new TokenResult(accessToken, ACCESS_TOKEN_VALIDITY.toSeconds(), idToken, rawRefreshToken);
+    }
+
+    private TokenResult executeRefreshTokenGrant(TokenCommand command, TenantId tenantId) {
+        OAuthClient client = authenticateClient(command, tenantId, GrantType.REFRESH_TOKEN);
+
+        if (isBlank(command.refreshToken())) {
+            throw new OAuthTokenException("invalid_request", "refresh_token must not be blank");
+        }
+
+        TokenHash tokenHash;
+        try {
+            tokenHash = verificationTokenHasher.hash(RawVerificationToken.of(command.refreshToken()));
+        } catch (InvalidVerificationTokenException ex) {
+            throw new OAuthTokenException("invalid_grant", "The refresh token is invalid");
+        }
+
+        RefreshToken refreshToken = refreshTokenRepository
+                .findByTokenHash(tokenHash)
+                .orElseThrow(() -> new OAuthTokenException("invalid_grant", "The refresh token is invalid"));
+
+        if (!refreshToken.tenantId().equals(tenantId) || !refreshToken.oauthClientId().equals(client.id())) {
+            throw new OAuthTokenException("invalid_grant", "The refresh token was not issued to this client");
+        }
+
+        Instant now = Instant.now();
+        try {
+            refreshToken.rotate(now);
+        } catch (RefreshTokenReusedException ex) {
+            revokeEntireFamily(refreshToken.familyId());
+            throw new OAuthTokenException(
+                    "invalid_grant", "The refresh token has already been used; the session has been revoked");
+        } catch (VerificationTokenExpiredException ex) {
+            throw new OAuthTokenException("invalid_grant", "The refresh token has expired");
+        }
+        refreshTokenRepository.save(refreshToken);
+
+        RawVerificationToken rawNextRefreshToken = RawVerificationToken.generate();
+        TokenHash nextTokenHash = verificationTokenHasher.hash(rawNextRefreshToken);
+        RefreshToken nextRefreshToken = RefreshToken.continueFamily(refreshToken, nextTokenHash, now);
+        refreshTokenRepository.save(nextRefreshToken);
+
+        SigningKey signingKey = currentSigningKey(tenantId);
+        byte[] privateKeyDer = privateKeyEncryptor.decrypt(signingKey.encryptedPrivateKey());
+
+        String accessToken = buildAccessToken(
+                command.issuer(), client, refreshToken.userId(), refreshToken.scopes(), signingKey, privateKeyDer, now);
+
+        String idToken = null;
+        if (refreshToken.scopes().contains(OPENID_SCOPE)) {
+            // OpenID Connect Core 1.0 section 12.2: an ID Token issued from a refresh MUST NOT
+            // carry a nonce claim, unlike the ID Token issued by the original authorization_code
+            // redemption.
+            idToken = buildIdToken(command.issuer(), client, refreshToken.userId(), signingKey, privateKeyDer, now, null);
+        }
+
+        return new TokenResult(accessToken, ACCESS_TOKEN_VALIDITY.toSeconds(), idToken, rawNextRefreshToken.value());
+    }
+
+    /** Revokes every token sharing {@code familyId} - the reuse-detection response (see the class
+     * Javadoc): a stolen-and-already-rotated refresh token means the whole chain is compromised,
+     * not just the one value presented. */
+    private void revokeEntireFamily(RefreshTokenFamilyId familyId) {
+        for (RefreshToken member : refreshTokenRepository.findAllByFamilyId(familyId)) {
+            member.revoke();
+            refreshTokenRepository.save(member);
+        }
+    }
+
+    private SigningKey currentSigningKey(TenantId tenantId) {
+        return signingKeyRepository
+                .findCurrentByTenantId(tenantId)
+                .orElseThrow(() -> new IllegalStateException("No current signing key found for tenant " + tenantId));
     }
 
     /**
@@ -153,12 +298,12 @@ public class TokenUseCase {
      * {@code client_id}, an unknown client, a client belonging to a different tenant, or a wrong
      * secret - is reported identically as {@code invalid_client}, mirroring the enumeration-safety
      * reasoning {@code OAuthClientNotFoundException} documents for {@code /authorize}. A client
-     * that authenticates successfully but is disabled, or is not authorized for this grant type,
-     * gets the more specific {@code unauthorized_client} instead - authentication itself did
-     * succeed in that case, so RFC 6749 §5.2's HTTP 401 (reserved for {@code invalid_client}) does
-     * not apply.
+     * that authenticates successfully but is disabled, or is not authorized for {@code
+     * requiredGrantType}, gets the more specific {@code unauthorized_client} instead -
+     * authentication itself did succeed in that case, so RFC 6749 §5.2's HTTP 401 (reserved for
+     * {@code invalid_client}) does not apply.
      */
-    private OAuthClient authenticateClient(TokenCommand command, TenantId tenantId) {
+    private OAuthClient authenticateClient(TokenCommand command, TenantId tenantId, GrantType requiredGrantType) {
         if (isBlank(command.basicAuthClientId()) || isBlank(command.basicAuthClientSecret())) {
             throw new OAuthTokenException("invalid_client", "Client authentication is required");
         }
@@ -182,9 +327,10 @@ public class TokenUseCase {
         if (!client.isUsable()) {
             throw new OAuthTokenException("unauthorized_client", "The client is not currently active");
         }
-        if (!client.supportsGrantType(GrantType.AUTHORIZATION_CODE)) {
+        if (!client.supportsGrantType(requiredGrantType)) {
             throw new OAuthTokenException(
-                    "unauthorized_client", "The client is not authorized for the authorization_code grant");
+                    "unauthorized_client",
+                    "The client is not authorized for the " + requiredGrantType.name().toLowerCase() + " grant");
         }
 
         return client;
@@ -231,39 +377,41 @@ public class TokenUseCase {
     }
 
     private String buildAccessToken(
-            TokenCommand command,
+            String issuer,
             OAuthClient client,
-            AuthorizationCode code,
+            UserId userId,
+            Set<String> scopes,
             SigningKey signingKey,
             byte[] privateKeyDer,
             Instant now) {
         Map<String, Object> claims = new LinkedHashMap<>();
-        claims.put("iss", command.issuer());
-        claims.put("sub", code.userId().value().toString());
+        claims.put("iss", issuer);
+        claims.put("sub", userId.value().toString());
         claims.put("aud", client.clientId().value());
         claims.put("client_id", client.clientId().value());
         claims.put("iat", now.getEpochSecond());
         claims.put("exp", now.plus(ACCESS_TOKEN_VALIDITY).getEpochSecond());
         claims.put("jti", UUID.randomUUID().toString());
-        claims.put("scope", String.join(" ", code.scopes()));
+        claims.put("scope", String.join(" ", scopes));
         return jwtSigner.sign(claims, privateKeyDer, signingKey.kid().value());
     }
 
     private String buildIdToken(
-            TokenCommand command,
+            String issuer,
             OAuthClient client,
-            AuthorizationCode code,
+            UserId userId,
             SigningKey signingKey,
             byte[] privateKeyDer,
-            Instant now) {
+            Instant now,
+            String nonce) {
         Map<String, Object> claims = new LinkedHashMap<>();
-        claims.put("iss", command.issuer());
-        claims.put("sub", code.userId().value().toString());
+        claims.put("iss", issuer);
+        claims.put("sub", userId.value().toString());
         claims.put("aud", client.clientId().value());
         claims.put("iat", now.getEpochSecond());
         claims.put("exp", now.plus(ID_TOKEN_VALIDITY).getEpochSecond());
-        if (code.nonce() != null) {
-            claims.put("nonce", code.nonce());
+        if (nonce != null) {
+            claims.put("nonce", nonce);
         }
         return jwtSigner.sign(claims, privateKeyDer, signingKey.kid().value());
     }

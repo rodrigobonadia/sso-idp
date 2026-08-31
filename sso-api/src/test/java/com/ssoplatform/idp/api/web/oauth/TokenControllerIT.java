@@ -132,6 +132,21 @@ class TokenControllerIT {
         return new TenantAndClient(tenantSlug + ".localhost", clientIdValue);
     }
 
+    private TenantAndClient provisionOfflineAccessClientAndSigningKey(String tenantSlug, String clientIdValue) {
+        CreateTenantResult tenant = createTenantUseCase.execute(new CreateTenantCommand("Acme Corp", tenantSlug));
+        OAuthClient client = OAuthClient.register(
+                TenantId.of(tenant.tenantId()),
+                ClientId.of(clientIdValue),
+                clientSecretHasher.hash(RAW_CLIENT_SECRET),
+                "Acme Test App",
+                Set.of(RedirectUri.of(REDIRECT_URI)),
+                Set.of("openid", "profile", "offline_access"),
+                Set.of(GrantType.AUTHORIZATION_CODE, GrantType.REFRESH_TOKEN));
+        oauthClientRepository.save(client);
+        generateSigningKeyUseCase.execute(new GenerateSigningKeyCommand(tenant.tenantId()));
+        return new TenantAndClient(tenantSlug + ".localhost", clientIdValue);
+    }
+
     /** RFC 7636 §4.1: 43-128 unreserved characters, generated the same way a real client would. */
     private static String randomCodeVerifier() {
         byte[] bytes = new byte[32];
@@ -281,6 +296,102 @@ class TokenControllerIT {
                 .andExpect(jsonPath("$.error").value("invalid_grant"));
     }
 
+    @Test
+    void redeemingACodeWithOfflineAccessScopeAlsoReturnsARefreshToken() throws Exception {
+        TenantAndClient ctx = provisionOfflineAccessClientAndSigningKey("acme-token-offline", "acme-token-offline-client");
+        String codeVerifier = randomCodeVerifier();
+        String code = obtainAuthorizationCode(
+                ctx.tenantSubdomain(), ctx.clientIdValue(), challengeFor(codeVerifier), "openid offline_access", null);
+
+        MvcResult result = mockMvc.perform(tokenRequest(ctx, code, codeVerifier)).andExpect(status().isOk()).andReturn();
+        Map<String, Object> body = objectMapper.readValue(result.getResponse().getContentAsString(), Map.class);
+
+        assertThat(body.get("refresh_token")).isNotNull();
+        assertThat((String) body.get("refresh_token")).isNotBlank();
+    }
+
+    @Test
+    void doesNotReturnARefreshTokenWhenOfflineAccessWasNotRequested() throws Exception {
+        TenantAndClient ctx = provisionOfflineAccessClientAndSigningKey("acme-token-noscope", "acme-token-noscope-client");
+        String codeVerifier = randomCodeVerifier();
+        String code = obtainAuthorizationCode(
+                ctx.tenantSubdomain(), ctx.clientIdValue(), challengeFor(codeVerifier), "openid profile", null);
+
+        MvcResult result = mockMvc.perform(tokenRequest(ctx, code, codeVerifier)).andExpect(status().isOk()).andReturn();
+        Map<String, Object> body = objectMapper.readValue(result.getResponse().getContentAsString(), Map.class);
+
+        assertThat(body).doesNotContainKey("refresh_token");
+    }
+
+    @Test
+    void redeemsARefreshTokenForANewAccessTokenAndRotatesIt() throws Exception {
+        TenantAndClient ctx = provisionOfflineAccessClientAndSigningKey("acme-token-refresh", "acme-token-refresh-client");
+        String codeVerifier = randomCodeVerifier();
+        String code = obtainAuthorizationCode(
+                ctx.tenantSubdomain(), ctx.clientIdValue(), challengeFor(codeVerifier), "openid offline_access", null);
+        MvcResult firstResult =
+                mockMvc.perform(tokenRequest(ctx, code, codeVerifier)).andExpect(status().isOk()).andReturn();
+        Map<String, Object> firstBody =
+                objectMapper.readValue(firstResult.getResponse().getContentAsString(), Map.class);
+        String firstRefreshToken = (String) firstBody.get("refresh_token");
+
+        MvcResult secondResult = mockMvc.perform(refreshTokenRequest(ctx, firstRefreshToken))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+                .andReturn();
+        Map<String, Object> secondBody =
+                objectMapper.readValue(secondResult.getResponse().getContentAsString(), Map.class);
+
+        assertThat(secondBody.get("access_token")).isNotNull();
+        assertThat(secondBody.get("id_token")).isNotNull();
+        String secondRefreshToken = (String) secondBody.get("refresh_token");
+        assertThat(secondRefreshToken).isNotBlank();
+        assertThat(secondRefreshToken).isNotEqualTo(firstRefreshToken);
+
+        RSAPublicKey publicKey = fetchTenantPublicKey(ctx.tenantSubdomain());
+        assertThat(verifiesSignature((String) secondBody.get("access_token"), publicKey)).isTrue();
+    }
+
+    @Test
+    void reusingAnAlreadyRotatedRefreshTokenRevokesTheWholeFamilyAndBothTokensStopWorking() throws Exception {
+        TenantAndClient ctx =
+                provisionOfflineAccessClientAndSigningKey("acme-token-reuse-rt", "acme-token-reuse-rt-client");
+        String codeVerifier = randomCodeVerifier();
+        String code = obtainAuthorizationCode(
+                ctx.tenantSubdomain(), ctx.clientIdValue(), challengeFor(codeVerifier), "openid offline_access", null);
+        MvcResult firstResult =
+                mockMvc.perform(tokenRequest(ctx, code, codeVerifier)).andExpect(status().isOk()).andReturn();
+        String firstRefreshToken =
+                (String) objectMapper.readValue(firstResult.getResponse().getContentAsString(), Map.class)
+                        .get("refresh_token");
+
+        MvcResult secondResult = mockMvc.perform(refreshTokenRequest(ctx, firstRefreshToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        String secondRefreshToken =
+                (String) objectMapper.readValue(secondResult.getResponse().getContentAsString(), Map.class)
+                        .get("refresh_token");
+
+        // Presenting the already-rotated first refresh token again is reuse: the whole family -
+        // including the currently-valid second token - must be revoked.
+        mockMvc.perform(refreshTokenRequest(ctx, firstRefreshToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_grant"));
+
+        mockMvc.perform(refreshTokenRequest(ctx, secondRefreshToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_grant"));
+    }
+
+    @Test
+    void rejectsARefreshTokenGrantWhenTheClientIsNotAuthorizedForIt() throws Exception {
+        TenantAndClient ctx = provisionTenantClientAndSigningKey("acme-token-rt-unauth", "acme-token-rt-unauth-client");
+
+        mockMvc.perform(refreshTokenRequest(ctx, "irrelevant-value-since-client-check-runs-first"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("unauthorized_client"));
+    }
+
     private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder tokenRequest(
             TenantAndClient ctx, String code, String codeVerifier) {
         // Deliberately no .with(csrf()) here - a real OAuth client never has a CSRF token to
@@ -296,6 +407,18 @@ class TokenControllerIT {
                 .param("code", code)
                 .param("redirect_uri", REDIRECT_URI)
                 .param("code_verifier", codeVerifier);
+    }
+
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder refreshTokenRequest(
+            TenantAndClient ctx, String refreshToken) {
+        return post("/token")
+                .with(request -> {
+                    request.setServerName(ctx.tenantSubdomain());
+                    return request;
+                })
+                .header(HttpHeaders.AUTHORIZATION, basicAuthHeader(ctx.clientIdValue(), RAW_CLIENT_SECRET))
+                .param("grant_type", "refresh_token")
+                .param("refresh_token", refreshToken);
     }
 
     private static String basicAuthHeader(String clientId, String clientSecret) {

@@ -8,16 +8,16 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * are mandated by the spec (unlike every other JSON response in this project, which is plain
  * camelCase - see {@code ErrorResponse}), hence the explicit {@link JsonProperty} annotations.
  *
- * <p>{@code idToken} is {@code null} whenever the redeemed authorization code did not carry the
- * {@code openid} scope (see {@code TokenResult}'s Javadoc) - {@link JsonInclude} on the whole
- * record omits the {@code id_token} field entirely from the JSON in that case, rather than
- * emitting a literal JSON {@code null}.
- *
- * <p>No {@code refresh_token} field - this grant never issues one, by explicit project decision.
+ * <p>{@code idToken} is {@code null} whenever the relevant scopes did not carry {@code openid}
+ * (see {@code TokenResult}'s Javadoc), and {@code refreshToken} is {@code null} whenever neither
+ * grant issued a new refresh token (see {@code TokenResult}'s Javadoc for the two cases that do).
+ * {@link JsonInclude} on the whole record omits both fields entirely from the JSON in those cases,
+ * rather than emitting a literal JSON {@code null}.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record TokenResponse(
         @JsonProperty("access_token") String accessToken,
         @JsonProperty("token_type") String tokenType,
         @JsonProperty("expires_in") long expiresIn,
-        @JsonProperty("id_token") String idToken) {}
+        @JsonProperty("id_token") String idToken,
+        @JsonProperty("refresh_token") String refreshToken) {}

@@ -16,6 +16,7 @@ import com.ssoplatform.idp.application.port.out.CodeVerifierValidator;
 import com.ssoplatform.idp.application.port.out.JwtSigner;
 import com.ssoplatform.idp.application.port.out.OAuthClientRepository;
 import com.ssoplatform.idp.application.port.out.PrivateKeyEncryptor;
+import com.ssoplatform.idp.application.port.out.RefreshTokenRepository;
 import com.ssoplatform.idp.application.port.out.SigningKeyRepository;
 import com.ssoplatform.idp.application.port.out.VerificationTokenHasher;
 import com.ssoplatform.idp.domain.authorization.AuthorizationCode;
@@ -25,6 +26,7 @@ import com.ssoplatform.idp.domain.oauth.ClientSecretHash;
 import com.ssoplatform.idp.domain.oauth.GrantType;
 import com.ssoplatform.idp.domain.oauth.OAuthClient;
 import com.ssoplatform.idp.domain.oauth.RedirectUri;
+import com.ssoplatform.idp.domain.refreshtoken.RefreshToken;
 import com.ssoplatform.idp.domain.signingkey.EncryptedPrivateKeyMaterial;
 import com.ssoplatform.idp.domain.signingkey.KeyId;
 import com.ssoplatform.idp.domain.signingkey.PublicKeyMaterial;
@@ -35,6 +37,7 @@ import com.ssoplatform.idp.domain.verification.RawVerificationToken;
 import com.ssoplatform.idp.domain.verification.TokenHash;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -56,6 +59,7 @@ class TokenUseCaseTest {
     private static final String REDIRECT_URI_VALUE = "https://app.example.com/callback";
     private static final String CODE_VALUE = "aVeryLongRawAuthorizationCodeValue12345";
     private static final String CODE_VERIFIER = "aVeryLongCodeVerifierValue1234567890abcdef";
+    private static final String REFRESH_TOKEN_VALUE = "aVeryLongRawRefreshTokenValue1234567890";
     private static final String ISSUER = "http://acme.localhost:8080";
     private static final String SIGNED_JWT = "header.payload.signature";
 
@@ -67,6 +71,9 @@ class TokenUseCaseTest {
 
     @Mock
     private AuthorizationCodeRepository authorizationCodeRepository;
+
+    @Mock
+    private RefreshTokenRepository refreshTokenRepository;
 
     @Mock
     private VerificationTokenHasher verificationTokenHasher;
@@ -91,6 +98,7 @@ class TokenUseCaseTest {
                 oauthClientRepository,
                 clientSecretHasher,
                 authorizationCodeRepository,
+                refreshTokenRepository,
                 verificationTokenHasher,
                 codeVerifierValidator,
                 signingKeyRepository,
@@ -107,6 +115,17 @@ class TokenUseCaseTest {
                 Set.of(RedirectUri.of(REDIRECT_URI_VALUE)),
                 Set.of("openid", "profile"),
                 Set.of(GrantType.AUTHORIZATION_CODE));
+    }
+
+    private static OAuthClient activeClientWithOfflineAccessAndRefresh() {
+        return OAuthClient.register(
+                TENANT_ID,
+                ClientId.of(CLIENT_ID_VALUE),
+                ClientSecretHash.of("stored-hash"),
+                "Acme Test App",
+                Set.of(RedirectUri.of(REDIRECT_URI_VALUE)),
+                Set.of("openid", "profile", "offline_access"),
+                Set.of(GrantType.AUTHORIZATION_CODE, GrantType.REFRESH_TOKEN));
     }
 
     private static AuthorizationCode codeFor(OAuthClient client, Set<String> scopes, String nonce) {
@@ -131,13 +150,25 @@ class TokenUseCaseTest {
                 EncryptedPrivateKeyMaterial.of("ZW5jcnlwdGVkLXByaXZhdGUta2V5"));
     }
 
+    private static RefreshToken refreshTokenFor(OAuthClient client, Set<String> scopes) {
+        return RefreshToken.issueFirst(
+                TENANT_ID, client.id(), USER_ID, TokenHash.of("hashed-refresh-token"), scopes, Instant.now(),
+                TokenUseCase.REFRESH_TOKEN_FAMILY_VALIDITY);
+    }
+
     private static TokenCommand validCommand() {
         return new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER,
+                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null,
                 CLIENT_ID_VALUE, CLIENT_SECRET);
     }
 
-    /** Wires the mocks so a fully valid request succeeds, for tests that only vary one thing. */
+    private static TokenCommand validRefreshCommand() {
+        return new TokenCommand(
+                TENANT_ID.value(), ISSUER, "refresh_token", null, null, null, REFRESH_TOKEN_VALUE, CLIENT_ID_VALUE,
+                CLIENT_SECRET);
+    }
+
+    /** Wires the mocks so a fully valid authorization_code request succeeds, for tests that only vary one thing. */
     private void stubHappyPathUpTo(OAuthClient client, AuthorizationCode code) {
         when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
         when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
@@ -146,6 +177,20 @@ class TokenUseCaseTest {
         when(codeVerifierValidator.matches(eq(CODE_VERIFIER), any(CodeChallenge.class))).thenReturn(true);
         when(authorizationCodeRepository.save(any(AuthorizationCode.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
+        when(signingKeyRepository.findCurrentByTenantId(TENANT_ID)).thenReturn(Optional.of(currentSigningKey()));
+        when(privateKeyEncryptor.decrypt(any(EncryptedPrivateKeyMaterial.class))).thenReturn(new byte[] {1, 2, 3});
+        when(jwtSigner.sign(any(), any(), anyString())).thenReturn(SIGNED_JWT);
+    }
+
+    /** Wires the mocks so a fully valid refresh_token request succeeds, for tests that only vary one thing. */
+    private void stubRefreshHappyPathUpTo(OAuthClient client, RefreshToken refreshToken) {
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+        when(verificationTokenHasher.hash(any(RawVerificationToken.class)))
+                .thenReturn(TokenHash.of("hashed-refresh-token"));
+        when(refreshTokenRepository.findByTokenHash(TokenHash.of("hashed-refresh-token")))
+                .thenReturn(Optional.of(refreshToken));
+        when(refreshTokenRepository.save(any(RefreshToken.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(signingKeyRepository.findCurrentByTenantId(TENANT_ID)).thenReturn(Optional.of(currentSigningKey()));
         when(privateKeyEncryptor.decrypt(any(EncryptedPrivateKeyMaterial.class))).thenReturn(new byte[] {1, 2, 3});
         when(jwtSigner.sign(any(), any(), anyString())).thenReturn(SIGNED_JWT);
@@ -237,9 +282,46 @@ class TokenUseCaseTest {
     }
 
     @Test
+    void doesNotIssueARefreshTokenWhenOfflineAccessWasNotGranted() {
+        OAuthClient client = activeClientWithOfflineAccessAndRefresh();
+        AuthorizationCode code = codeFor(client, Set.of("openid", "profile"), null);
+        stubHappyPathUpTo(client, code);
+
+        TokenResult result = useCase.execute(validCommand());
+
+        assertThat(result.refreshToken()).isNull();
+        verify(refreshTokenRepository, never()).save(any());
+    }
+
+    @Test
+    void doesNotIssueARefreshTokenWhenTheClientDoesNotSupportTheRefreshTokenGrant() {
+        OAuthClient client = activeClient();
+        AuthorizationCode code = codeFor(client, Set.of("openid", "offline_access"), null);
+        stubHappyPathUpTo(client, code);
+
+        TokenResult result = useCase.execute(validCommand());
+
+        assertThat(result.refreshToken()).isNull();
+        verify(refreshTokenRepository, never()).save(any());
+    }
+
+    @Test
+    void issuesAFirstRefreshTokenWhenOfflineAccessWasGrantedAndTheClientSupportsTheRefreshTokenGrant() {
+        OAuthClient client = activeClientWithOfflineAccessAndRefresh();
+        AuthorizationCode code = codeFor(client, Set.of("openid", "offline_access"), null);
+        stubHappyPathUpTo(client, code);
+        when(refreshTokenRepository.save(any(RefreshToken.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        TokenResult result = useCase.execute(validCommand());
+
+        assertThat(result.refreshToken()).isNotBlank();
+        verify(refreshTokenRepository).save(any(RefreshToken.class));
+    }
+
+    @Test
     void rejectsAnUnsupportedGrantType() {
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "client_credentials", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER,
+                TENANT_ID.value(), ISSUER, "client_credentials", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null,
                 CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
@@ -251,7 +333,8 @@ class TokenUseCaseTest {
     @Test
     void rejectsWhenNoBasicAuthCredentialsArePresent() {
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null, null);
+                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null,
+                null, null);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -262,8 +345,8 @@ class TokenUseCaseTest {
     @Test
     void rejectsAMalformedBasicAuthClientId() {
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, "!!",
-                CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null,
+                "!!", CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -345,7 +428,7 @@ class TokenUseCaseTest {
         when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
 
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", "  ", REDIRECT_URI_VALUE, CODE_VERIFIER,
+                TENANT_ID.value(), ISSUER, "authorization_code", "  ", REDIRECT_URI_VALUE, CODE_VERIFIER, null,
                 CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
@@ -360,8 +443,8 @@ class TokenUseCaseTest {
         when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
 
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, "  ", CODE_VERIFIER, CLIENT_ID_VALUE,
-                CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, "  ", CODE_VERIFIER, null,
+                CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -375,8 +458,8 @@ class TokenUseCaseTest {
         when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
 
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, "  ", CLIENT_ID_VALUE,
-                CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, "  ", null,
+                CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -390,8 +473,8 @@ class TokenUseCaseTest {
         when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
 
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", "!", REDIRECT_URI_VALUE, CODE_VERIFIER, CLIENT_ID_VALUE,
-                CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "authorization_code", "!", REDIRECT_URI_VALUE, CODE_VERIFIER, null,
+                CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -470,8 +553,8 @@ class TokenUseCaseTest {
         when(authorizationCodeRepository.findByCodeHash(TokenHash.of("hashed-code"))).thenReturn(Optional.of(code));
 
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, "not a uri", CODE_VERIFIER, CLIENT_ID_VALUE,
-                CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, "not a uri", CODE_VERIFIER, null,
+                CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -550,5 +633,162 @@ class TokenUseCaseTest {
         when(signingKeyRepository.findCurrentByTenantId(TENANT_ID)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> useCase.execute(validCommand())).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void rotatesARefreshTokenAndIssuesANewAccessTokenPlusANewRefreshToken() {
+        OAuthClient client = activeClientWithOfflineAccessAndRefresh();
+        RefreshToken refreshToken = refreshTokenFor(client, Set.of("openid", "offline_access"));
+        stubRefreshHappyPathUpTo(client, refreshToken);
+
+        TokenResult result = useCase.execute(validRefreshCommand());
+
+        assertThat(result.accessToken()).isEqualTo(SIGNED_JWT);
+        assertThat(result.idToken()).isEqualTo(SIGNED_JWT);
+        assertThat(result.refreshToken()).isNotBlank();
+        assertThat(refreshToken.status().name()).isEqualTo("ROTATED");
+        verify(refreshTokenRepository, org.mockito.Mockito.times(2)).save(any(RefreshToken.class));
+    }
+
+    @Test
+    void doesNotCarryANonceOnTheIdTokenIssuedByARefresh() {
+        OAuthClient client = activeClientWithOfflineAccessAndRefresh();
+        RefreshToken refreshToken = refreshTokenFor(client, Set.of("openid", "offline_access"));
+        stubRefreshHappyPathUpTo(client, refreshToken);
+
+        useCase.execute(validRefreshCommand());
+
+        ArgumentCaptor<Map<String, Object>> claimsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(jwtSigner, org.mockito.Mockito.times(2)).sign(claimsCaptor.capture(), any(), anyString());
+        boolean anyClaimsCarryNonce = claimsCaptor.getAllValues().stream().anyMatch(claims -> claims.containsKey("nonce"));
+        assertThat(anyClaimsCarryNonce).isFalse();
+    }
+
+    @Test
+    void rejectsARefreshTokenGrantWhenTheClientIsNotAuthorizedForIt() {
+        OAuthClient client = activeClient();
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+
+        assertThatThrownBy(() -> useCase.execute(validRefreshCommand()))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("unauthorized_client"));
+    }
+
+    @Test
+    void rejectsABlankRefreshToken() {
+        OAuthClient client = activeClientWithOfflineAccessAndRefresh();
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+
+        TokenCommand command = new TokenCommand(
+                TENANT_ID.value(), ISSUER, "refresh_token", null, null, null, "  ", CLIENT_ID_VALUE, CLIENT_SECRET);
+
+        assertThatThrownBy(() -> useCase.execute(command))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("invalid_request"));
+    }
+
+    @Test
+    void rejectsAMalformedRefreshTokenAsInvalidGrant() {
+        OAuthClient client = activeClientWithOfflineAccessAndRefresh();
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+
+        TokenCommand command = new TokenCommand(
+                TENANT_ID.value(), ISSUER, "refresh_token", null, null, null, "!", CLIENT_ID_VALUE, CLIENT_SECRET);
+
+        assertThatThrownBy(() -> useCase.execute(command))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("invalid_grant"));
+    }
+
+    @Test
+    void rejectsAnUnknownRefreshToken() {
+        OAuthClient client = activeClientWithOfflineAccessAndRefresh();
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+        when(verificationTokenHasher.hash(any(RawVerificationToken.class)))
+                .thenReturn(TokenHash.of("hashed-refresh-token"));
+        when(refreshTokenRepository.findByTokenHash(TokenHash.of("hashed-refresh-token"))).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> useCase.execute(validRefreshCommand()))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("invalid_grant"));
+    }
+
+    @Test
+    void rejectsARefreshTokenIssuedToADifferentClient() {
+        OAuthClient client = activeClientWithOfflineAccessAndRefresh();
+        OAuthClient otherClient = OAuthClient.register(
+                TENANT_ID,
+                ClientId.of("some-other-app"),
+                ClientSecretHash.of("stored-hash"),
+                "Other App",
+                Set.of(RedirectUri.of(REDIRECT_URI_VALUE)),
+                Set.of("openid", "offline_access"),
+                Set.of(GrantType.AUTHORIZATION_CODE, GrantType.REFRESH_TOKEN));
+        RefreshToken refreshTokenForOtherClient = refreshTokenFor(otherClient, Set.of("openid", "offline_access"));
+
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+        when(verificationTokenHasher.hash(any(RawVerificationToken.class)))
+                .thenReturn(TokenHash.of("hashed-refresh-token"));
+        when(refreshTokenRepository.findByTokenHash(TokenHash.of("hashed-refresh-token")))
+                .thenReturn(Optional.of(refreshTokenForOtherClient));
+
+        assertThatThrownBy(() -> useCase.execute(validRefreshCommand()))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("invalid_grant"));
+    }
+
+    @Test
+    void rejectsAnExpiredRefreshTokenFamily() {
+        OAuthClient client = activeClientWithOfflineAccessAndRefresh();
+        RefreshToken refreshToken = RefreshToken.issueFirst(
+                TENANT_ID,
+                client.id(),
+                USER_ID,
+                TokenHash.of("hashed-refresh-token"),
+                Set.of("openid", "offline_access"),
+                Instant.now().minus(Duration.ofDays(31)),
+                TokenUseCase.REFRESH_TOKEN_FAMILY_VALIDITY);
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+        when(verificationTokenHasher.hash(any(RawVerificationToken.class)))
+                .thenReturn(TokenHash.of("hashed-refresh-token"));
+        when(refreshTokenRepository.findByTokenHash(TokenHash.of("hashed-refresh-token")))
+                .thenReturn(Optional.of(refreshToken));
+
+        assertThatThrownBy(() -> useCase.execute(validRefreshCommand()))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("invalid_grant"));
+        verify(refreshTokenRepository, never()).findAllByFamilyId(any());
+    }
+
+    @Test
+    void revokesTheEntireFamilyWhenAnAlreadyRotatedRefreshTokenIsPresentedAgain() {
+        OAuthClient client = activeClientWithOfflineAccessAndRefresh();
+        RefreshToken refreshToken = refreshTokenFor(client, Set.of("openid", "offline_access"));
+        refreshToken.rotate(Instant.now());
+        RefreshToken sibling = RefreshToken.continueFamily(refreshToken, TokenHash.of("hashed-sibling"), Instant.now());
+
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+        when(verificationTokenHasher.hash(any(RawVerificationToken.class)))
+                .thenReturn(TokenHash.of("hashed-refresh-token"));
+        when(refreshTokenRepository.findByTokenHash(TokenHash.of("hashed-refresh-token")))
+                .thenReturn(Optional.of(refreshToken));
+        when(refreshTokenRepository.findAllByFamilyId(refreshToken.familyId()))
+                .thenReturn(List.of(refreshToken, sibling));
+
+        assertThatThrownBy(() -> useCase.execute(validRefreshCommand()))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("invalid_grant"));
+
+        assertThat(refreshToken.status().name()).isEqualTo("REVOKED");
+        assertThat(sibling.status().name()).isEqualTo("REVOKED");
+        verify(refreshTokenRepository).save(refreshToken);
+        verify(refreshTokenRepository).save(sibling);
     }
 }
