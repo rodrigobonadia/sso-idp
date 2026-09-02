@@ -27,7 +27,7 @@ public final class OAuthClientEntityMapper {
                 client.id().value(),
                 client.tenantId().value(),
                 client.clientId().value(),
-                client.clientSecretHash().value(),
+                client.clientSecretHash() == null ? null : client.clientSecretHash().value(),
                 client.name(),
                 join(client.redirectUris().stream().map(RedirectUri::value)),
                 join(client.allowedScopes().stream()),
@@ -47,7 +47,7 @@ public final class OAuthClientEntityMapper {
                 OAuthClientId.of(entity.getId()),
                 TenantId.of(entity.getTenantId()),
                 ClientId.of(entity.getClientId()),
-                ClientSecretHash.of(entity.getClientSecretHash()),
+                entity.getClientSecretHash() == null ? null : ClientSecretHash.of(entity.getClientSecretHash()),
                 entity.getName(),
                 redirectUris,
                 allowedScopes,
@@ -60,7 +60,18 @@ public final class OAuthClientEntityMapper {
         return values.collect(Collectors.joining(SEPARATOR));
     }
 
+    /**
+     * {@code String.split} on an empty string yields a single blank element rather than an empty
+     * array, which would otherwise make an empty {@code redirect_uris} column (valid for a client
+     * not authorized for {@code AUTHORIZATION_CODE} - see {@link OAuthClient}'s Javadoc) fail to
+     * reload via {@link RedirectUri#of}. Guarding for blank here keeps this shared helper correct
+     * for every one of this entity's three multi-valued columns, even though only {@code
+     * redirect_uris} can actually be empty today.
+     */
     private static java.util.stream.Stream<String> split(String commaSeparated) {
+        if (commaSeparated == null || commaSeparated.isBlank()) {
+            return java.util.stream.Stream.empty();
+        }
         return java.util.Arrays.stream(commaSeparated.split(SEPARATOR)).map(String::trim);
     }
 }

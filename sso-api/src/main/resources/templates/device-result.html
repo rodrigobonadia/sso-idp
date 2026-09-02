@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8" />
+    <title>Device authorization</title>
+</head>
+<body>
+<h1 th:if="${approved}">Device authorized</h1>
+<h1 th:unless="${approved}">Authorization denied</h1>
+<p th:if="${approved}">You may return to your device.</p>
+<p th:unless="${approved}">The device was not authorized. You may close this page.</p>
+</body>
+</html>

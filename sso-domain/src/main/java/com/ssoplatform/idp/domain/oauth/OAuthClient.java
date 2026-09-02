@@ -13,13 +13,25 @@ import java.util.Set;
  * reason: the web layer already resolves the active tenant from the request's subdomain (Phase
  * 2.1), so a client usable across tenants would have no reliable way to be looked up.
  *
- * <p>Only <b>confidential</b> clients are modeled so far (a {@link #clientSecretHash} is always
- * present): public clients (SPAs, native/mobile apps with no client secret) are deliberately
- * deferred - see {@code architecture_decisions.md}. Every client requires PKCE regardless of type,
- * per the same decision - so this entity does not carry a "requires PKCE" flag at all; the
- * {@code /authorize} and {@code /token} endpoints being built in later Phase 3 sub-phases enforce
- * PKCE unconditionally for every request, rather than this being a per-client, disable-able
- * setting.
+ * <p>{@link #clientSecretHash} is {@code null} for a <b>public</b> client - one that cannot
+ * securely hold a secret (a smart TV, a CLI tool) - and non-null for a <b>confidential</b> one; see
+ * {@link #isConfidential()}/{@link #isPublic()}. Public clients were introduced in Phase 3.9
+ * specifically for the Device Authorization Grant (RFC 8628), which is genuinely the market-
+ * standard use case for this client type - every other grant this platform implements ({@code
+ * authorization_code}, {@code refresh_token}, {@code client_credentials}) still requires a
+ * confidential client, exactly as before; only {@code TokenUseCase.executeDeviceCodeGrant} and
+ * {@code RequestDeviceAuthorizationUseCase} ever accept a public one. Full public-client support
+ * for other grants (e.g. a PKCE-only SPA using {@code authorization_code}) remains deferred - see
+ * {@code architecture_decisions.md}.
+ *
+ * <p>Every client requires PKCE regardless of type, per an earlier Phase 3 decision - so this
+ * entity does not carry a "requires PKCE" flag at all; the {@code /authorize} and {@code /token}
+ * endpoints enforce PKCE unconditionally for every request that uses it, rather than this being a
+ * per-client, disable-able setting.
+ *
+ * <p>{@link #redirectUris} may be empty ONLY for a client that does not support {@code
+ * AUTHORIZATION_CODE} - a redirect URI is meaningless for {@code client_credentials} and {@code
+ * device_code}, which never redirect a browser anywhere; see {@link #validateRedirectUris}.
  *
  * <p>{@link #allowedScopes} and {@link #allowedGrantTypes} are both intersected against what a
  * given request actually asks for - see {@link #supportsScope(String)} and {@link
@@ -66,7 +78,8 @@ public final class OAuthClient {
         this.createdAt = createdAt;
     }
 
-    /** Registers a brand-new, active client. */
+    /** Registers a brand-new, active client. {@code clientSecretHash} may be {@code null} to
+     * register a public client - see the class Javadoc. */
     public static OAuthClient register(
             TenantId tenantId,
             ClientId clientId,
@@ -77,16 +90,16 @@ public final class OAuthClient {
             Set<GrantType> allowedGrantTypes) {
         Objects.requireNonNull(tenantId, "tenantId must not be null");
         Objects.requireNonNull(clientId, "clientId must not be null");
-        Objects.requireNonNull(clientSecretHash, "clientSecretHash must not be null");
+        Set<GrantType> validatedGrantTypes = validateGrantTypes(allowedGrantTypes);
         return new OAuthClient(
                 OAuthClientId.generate(),
                 tenantId,
                 clientId,
                 clientSecretHash,
                 validateName(name),
-                validateRedirectUris(redirectUris),
+                validateRedirectUris(redirectUris, validatedGrantTypes),
                 validateScopes(allowedScopes),
-                validateGrantTypes(allowedGrantTypes),
+                validatedGrantTypes,
                 OAuthClientStatus.ACTIVE,
                 Instant.now());
     }
@@ -106,18 +119,18 @@ public final class OAuthClient {
         Objects.requireNonNull(id, "id must not be null");
         Objects.requireNonNull(tenantId, "tenantId must not be null");
         Objects.requireNonNull(clientId, "clientId must not be null");
-        Objects.requireNonNull(clientSecretHash, "clientSecretHash must not be null");
         Objects.requireNonNull(status, "status must not be null");
         Objects.requireNonNull(createdAt, "createdAt must not be null");
+        Set<GrantType> validatedGrantTypes = validateGrantTypes(allowedGrantTypes);
         return new OAuthClient(
                 id,
                 tenantId,
                 clientId,
                 clientSecretHash,
                 validateName(name),
-                validateRedirectUris(redirectUris),
+                validateRedirectUris(redirectUris, validatedGrantTypes),
                 validateScopes(allowedScopes),
-                validateGrantTypes(allowedGrantTypes),
+                validatedGrantTypes,
                 status,
                 createdAt);
     }
@@ -129,10 +142,18 @@ public final class OAuthClient {
         return candidate.trim();
     }
 
-    private static Set<RedirectUri> validateRedirectUris(Set<RedirectUri> candidate) {
+    /**
+     * A redirect URI is only meaningful to the {@code AUTHORIZATION_CODE} grant (it is where the
+     * browser is sent back to with a code); {@code CLIENT_CREDENTIALS} and {@code DEVICE_CODE}
+     * never redirect a browser anywhere, so a client authorized ONLY for one of those may be
+     * registered with an empty set. A client that supports {@code AUTHORIZATION_CODE} must still
+     * register at least one, exactly as before.
+     */
+    private static Set<RedirectUri> validateRedirectUris(Set<RedirectUri> candidate, Set<GrantType> allowedGrantTypes) {
         Objects.requireNonNull(candidate, "redirectUris must not be null");
-        if (candidate.isEmpty()) {
-            throw new IllegalArgumentException("An OAuth client must have at least one redirect URI");
+        if (candidate.isEmpty() && allowedGrantTypes.contains(GrantType.AUTHORIZATION_CODE)) {
+            throw new IllegalArgumentException(
+                    "An OAuth client authorized for the authorization_code grant must have at least one redirect URI");
         }
         return Set.copyOf(candidate);
     }
@@ -185,6 +206,18 @@ public final class OAuthClient {
         return status == OAuthClientStatus.ACTIVE;
     }
 
+    /** {@code true} when this client holds a secret and must authenticate with it (HTTP Basic) -
+     * every grant except {@code DEVICE_CODE} requires this. */
+    public boolean isConfidential() {
+        return clientSecretHash != null;
+    }
+
+    /** {@code true} when this client holds no secret at all - see the class Javadoc for why this
+     * exists only to support the Device Authorization Grant so far. */
+    public boolean isPublic() {
+        return clientSecretHash == null;
+    }
+
     /** Exact-match lookup against the registered redirect URIs - see the class Javadoc for why this is never a prefix/pattern match. */
     public boolean isRedirectUriRegistered(RedirectUri candidate) {
         Objects.requireNonNull(candidate, "candidate must not be null");
@@ -211,6 +244,7 @@ public final class OAuthClient {
         return clientId;
     }
 
+    /** {@code null} for a public client - see {@link #isPublic()}. */
     public ClientSecretHash clientSecretHash() {
         return clientSecretHash;
     }

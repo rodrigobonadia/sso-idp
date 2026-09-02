@@ -184,6 +184,32 @@ class OAuthClientTest {
     }
 
     @Test
+    void isConfidentialAndIsPublicReflectWhetherASecretHashIsPresent() {
+        OAuthClient client = register();
+
+        assertThat(client.isConfidential()).isTrue();
+        assertThat(client.isPublic()).isFalse();
+    }
+
+    @Test
+    void registeringWithANullSecretHashCreatesAPublicClient() {
+        OAuthClient client = OAuthClient.register(
+                tenantId, clientId, null, "Device App", Set.of(), scopes, Set.of(GrantType.DEVICE_CODE));
+
+        assertThat(client.clientSecretHash()).isNull();
+        assertThat(client.isConfidential()).isFalse();
+        assertThat(client.isPublic()).isTrue();
+    }
+
+    @Test
+    void aClientNotAuthorizedForAuthorizationCodeMayRegisterWithNoRedirectUris() {
+        OAuthClient client = OAuthClient.register(
+                tenantId, clientId, secretHash, "Device App", Set.of(), scopes, Set.of(GrantType.DEVICE_CODE));
+
+        assertThat(client.redirectUris()).isEmpty();
+    }
+
+        @Test
     void equalityIsBasedOnId() {
         OAuthClientId id = OAuthClientId.generate();
         Instant createdAt = Instant.now();

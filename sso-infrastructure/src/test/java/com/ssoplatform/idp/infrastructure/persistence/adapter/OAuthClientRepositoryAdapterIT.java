@@ -6,6 +6,7 @@ import com.ssoplatform.idp.domain.oauth.ClientId;
 import com.ssoplatform.idp.domain.oauth.ClientSecretHash;
 import com.ssoplatform.idp.domain.oauth.GrantType;
 import com.ssoplatform.idp.domain.oauth.OAuthClient;
+import com.ssoplatform.idp.domain.oauth.OAuthClientId;
 import com.ssoplatform.idp.domain.oauth.OAuthClientStatus;
 import com.ssoplatform.idp.domain.oauth.RedirectUri;
 import com.ssoplatform.idp.domain.tenant.Tenant;
@@ -97,5 +98,42 @@ class OAuthClientRepositoryAdapterIT {
         assertThat(reloaded).isPresent();
         assertThat(reloaded.get().status()).isEqualTo(OAuthClientStatus.DISABLED);
         assertThat(reloaded.get().isUsable()).isFalse();
+    }
+
+    @Test
+    void savesAndReloadsAPublicClientWithANullSecretHash() {
+        OAuthClient client = OAuthClient.register(
+                tenant.id(),
+                ClientId.of("acme-cli-" + System.nanoTime()),
+                null,
+                "Acme CLI",
+                Set.of(),
+                Set.of("openid"),
+                Set.of(GrantType.DEVICE_CODE));
+
+        oauthClientRepository.save(client);
+        Optional<OAuthClient> reloaded = oauthClientRepository.findByClientId(client.clientId());
+
+        assertThat(reloaded).isPresent();
+        assertThat(reloaded.get().clientSecretHash()).isNull();
+        assertThat(reloaded.get().isPublic()).isTrue();
+        assertThat(reloaded.get().redirectUris()).isEmpty();
+    }
+
+    @Test
+    void findByIdReloadsAClientByItsInternalId() {
+        OAuthClient client = newClient("acme-app-" + System.nanoTime());
+        oauthClientRepository.save(client);
+
+        Optional<OAuthClient> reloaded = oauthClientRepository.findById(client.id());
+
+        assertThat(reloaded).isPresent();
+        assertThat(reloaded.get().clientId()).isEqualTo(client.clientId());
+    }
+
+    @Test
+    void findByIdIsEmptyWhenNoClientMatches() {
+        assertThat(oauthClientRepository.findById(OAuthClientId.generate()))
+                .isEmpty();
     }
 }

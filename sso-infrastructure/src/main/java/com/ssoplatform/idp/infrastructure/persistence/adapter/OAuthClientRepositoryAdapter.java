@@ -3,6 +3,7 @@ package com.ssoplatform.idp.infrastructure.persistence.adapter;
 import com.ssoplatform.idp.application.port.out.OAuthClientRepository;
 import com.ssoplatform.idp.domain.oauth.ClientId;
 import com.ssoplatform.idp.domain.oauth.OAuthClient;
+import com.ssoplatform.idp.domain.oauth.OAuthClientId;
 import com.ssoplatform.idp.infrastructure.persistence.entity.OAuthClientJpaEntity;
 import com.ssoplatform.idp.infrastructure.persistence.mapper.OAuthClientEntityMapper;
 import com.ssoplatform.idp.infrastructure.persistence.repository.OAuthClientJpaRepository;
@@ -28,5 +29,10 @@ public class OAuthClientRepositoryAdapter implements OAuthClientRepository {
     @Override
     public Optional<OAuthClient> findByClientId(ClientId clientId) {
         return jpaRepository.findByClientId(clientId.value()).map(OAuthClientEntityMapper::toDomain);
+    }
+
+    @Override
+    public Optional<OAuthClient> findById(OAuthClientId id) {
+        return jpaRepository.findById(id.value()).map(OAuthClientEntityMapper::toDomain);
     }
 }

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8" />
+    <title>Confirm device</title>
+</head>
+<body>
+<h1>Authorize device</h1>
+<p><span th:text="${clientName}"></span> wants to sign in using code
+    <strong th:text="${userCode}"></strong>.</p>
+<p>If you did not request this, click Deny.</p>
+
+<form th:action="@{/device/allow}" method="post" style="display:inline">
+    <input type="hidden" name="user_code" th:value="${userCode}" />
+    <button type="submit">Allow</button>
+</form>
+<form th:action="@{/device/deny}" method="post" style="display:inline">
+    <input type="hidden" name="user_code" th:value="${userCode}" />
+    <button type="submit">Deny</button>
+</form>
+</body>
+</html>

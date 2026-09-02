@@ -5,6 +5,7 @@ import com.ssoplatform.idp.application.port.out.AuthorizationCodeRepository;
 import com.ssoplatform.idp.application.port.out.ClientResourceAuthorizationRepository;
 import com.ssoplatform.idp.application.port.out.ClientSecretHasher;
 import com.ssoplatform.idp.application.port.out.CodeVerifierValidator;
+import com.ssoplatform.idp.application.port.out.DeviceCodeRepository;
 import com.ssoplatform.idp.application.port.out.JwtSigner;
 import com.ssoplatform.idp.application.port.out.OAuthClientRepository;
 import com.ssoplatform.idp.application.port.out.PrivateKeyEncryptor;
@@ -13,6 +14,8 @@ import com.ssoplatform.idp.application.port.out.ResourceRepository;
 import com.ssoplatform.idp.application.port.out.SigningKeyRepository;
 import com.ssoplatform.idp.application.port.out.VerificationTokenHasher;
 import com.ssoplatform.idp.domain.authorization.AuthorizationCode;
+import com.ssoplatform.idp.domain.devicecode.DeviceCode;
+import com.ssoplatform.idp.domain.devicecode.DeviceCodeStatus;
 import com.ssoplatform.idp.domain.oauth.ClientId;
 import com.ssoplatform.idp.domain.oauth.GrantType;
 import com.ssoplatform.idp.domain.oauth.InvalidClientIdException;
@@ -55,6 +58,9 @@ import java.util.stream.Collectors;
  *       RefreshToken} forward one step in its family - see {@link #executeRefreshTokenGrant}.
  *   <li>{@code client_credentials} (RFC 6749 §4.4), a machine-to-machine grant with no resource
  *       owner/user behind it at all - see {@link #executeClientCredentialsGrant}.
+ *   <li>{@code urn:ietf:params:oauth:grant-type:device_code} (RFC 8628 §3.4), redeemed by an
+ *       input-constrained device repeatedly polling this endpoint while a human approves it
+ *       elsewhere - see {@link #executeDeviceCodeGrant}.
  * </ul>
  *
  * On success, the {@code authorization_code} and {@code refresh_token} grants issue a freshly
@@ -135,8 +141,13 @@ public class TokenUseCase {
     private static final String GRANT_TYPE_AUTHORIZATION_CODE = "authorization_code";
     private static final String GRANT_TYPE_REFRESH_TOKEN = "refresh_token";
     private static final String GRANT_TYPE_CLIENT_CREDENTIALS = "client_credentials";
+    private static final String GRANT_TYPE_DEVICE_CODE = "urn:ietf:params:oauth:grant-type:device_code";
     private static final String OPENID_SCOPE = "openid";
     private static final String OFFLINE_ACCESS_SCOPE = "offline_access";
+
+    /** Mirrors {@code RequestDeviceAuthorizationUseCase#POLL_INTERVAL_SECONDS} - the same fixed
+     * interval a device authorization response advertises is the one a poll is judged against. */
+    static final Duration DEVICE_CODE_POLL_INTERVAL = Duration.ofSeconds(5);
 
     private final OAuthClientRepository oauthClientRepository;
     private final ClientSecretHasher clientSecretHasher;
@@ -144,6 +155,7 @@ public class TokenUseCase {
     private final RefreshTokenRepository refreshTokenRepository;
     private final ResourceRepository resourceRepository;
     private final ClientResourceAuthorizationRepository clientResourceAuthorizationRepository;
+    private final DeviceCodeRepository deviceCodeRepository;
     private final VerificationTokenHasher verificationTokenHasher;
     private final CodeVerifierValidator codeVerifierValidator;
     private final SigningKeyRepository signingKeyRepository;
@@ -157,6 +169,7 @@ public class TokenUseCase {
             RefreshTokenRepository refreshTokenRepository,
             ResourceRepository resourceRepository,
             ClientResourceAuthorizationRepository clientResourceAuthorizationRepository,
+            DeviceCodeRepository deviceCodeRepository,
             VerificationTokenHasher verificationTokenHasher,
             CodeVerifierValidator codeVerifierValidator,
             SigningKeyRepository signingKeyRepository,
@@ -172,6 +185,7 @@ public class TokenUseCase {
         this.resourceRepository = Objects.requireNonNull(resourceRepository, "resourceRepository must not be null");
         this.clientResourceAuthorizationRepository = Objects.requireNonNull(
                 clientResourceAuthorizationRepository, "clientResourceAuthorizationRepository must not be null");
+        this.deviceCodeRepository = Objects.requireNonNull(deviceCodeRepository, "deviceCodeRepository must not be null");
         this.verificationTokenHasher =
                 Objects.requireNonNull(verificationTokenHasher, "verificationTokenHasher must not be null");
         this.codeVerifierValidator =
@@ -195,10 +209,13 @@ public class TokenUseCase {
         if (GRANT_TYPE_CLIENT_CREDENTIALS.equals(command.grantType())) {
             return executeClientCredentialsGrant(command, tenantId);
         }
+        if (GRANT_TYPE_DEVICE_CODE.equals(command.grantType())) {
+            return executeDeviceCodeGrant(command, tenantId);
+        }
         throw new OAuthTokenException(
                 "unsupported_grant_type",
-                "Only grant_type=authorization_code, grant_type=refresh_token or "
-                        + "grant_type=client_credentials is supported");
+                "Only grant_type=authorization_code, grant_type=refresh_token, "
+                        + "grant_type=client_credentials or grant_type=" + GRANT_TYPE_DEVICE_CODE + " is supported");
     }
 
     private TokenResult executeAuthorizationCodeGrant(TokenCommand command, TenantId tenantId) {
@@ -398,6 +415,173 @@ public class TokenUseCase {
                 now);
 
         return new TokenResult(accessToken, ACCESS_TOKEN_VALIDITY.toSeconds(), null, null);
+    }
+
+    /**
+     * Handles the {@code urn:ietf:params:oauth:grant-type:device_code} grant (RFC 8628 §3.4): the
+     * device polling loop. Every poll first records itself (via {@link DeviceCode#recordPoll}) and
+     * is checked against the fixed {@link #DEVICE_CODE_POLL_INTERVAL} BEFORE that recording is
+     * considered for the NEXT poll - see {@link DeviceCode#isPolledTooSoon}'s Javadoc for why the
+     * order matters - so a client that ignores {@code slow_down} and keeps polling too fast keeps
+     * getting {@code slow_down} rather than silently succeeding once enough time has passed
+     * relative to some earlier, stale poll.
+     *
+     * <p>Unlike every other grant in this class, the outcome here is read directly from {@link
+     * DeviceCode#status()} rather than caught as a single collapsed exception - see {@code
+     * DeviceCodeStatus}'s Javadoc for why a {@code PENDING} vs. {@code DENIED} vs. already-{@code
+     * REDEEMED} code must produce three different RFC 8628 error codes rather than one.
+     */
+    private TokenResult executeDeviceCodeGrant(TokenCommand command, TenantId tenantId) {
+        OAuthClient client = authenticateClientForDeviceCodeGrant(command, tenantId);
+
+        if (isBlank(command.deviceCode())) {
+            throw new OAuthTokenException("invalid_request", "device_code must not be blank");
+        }
+
+        TokenHash deviceCodeHash;
+        try {
+            deviceCodeHash = verificationTokenHasher.hash(RawVerificationToken.of(command.deviceCode()));
+        } catch (InvalidVerificationTokenException ex) {
+            throw new OAuthTokenException("invalid_grant", "The device_code is invalid");
+        }
+
+        DeviceCode deviceCode = deviceCodeRepository
+                .findByDeviceCodeHash(deviceCodeHash)
+                .orElseThrow(() -> new OAuthTokenException("invalid_grant", "The device_code is invalid"));
+
+        if (!deviceCode.tenantId().equals(tenantId) || !deviceCode.oauthClientId().equals(client.id())) {
+            throw new OAuthTokenException("invalid_grant", "The device_code was not issued to this client");
+        }
+
+        Instant now = Instant.now();
+
+        if (deviceCode.isExpired(now)) {
+            throw new OAuthTokenException("expired_token", "The device code has expired");
+        }
+
+        boolean polledTooSoon = deviceCode.isPolledTooSoon(now, DEVICE_CODE_POLL_INTERVAL);
+        deviceCode.recordPoll(now);
+        deviceCodeRepository.save(deviceCode);
+        if (polledTooSoon) {
+            throw new OAuthTokenException("slow_down", "The device is polling faster than the allowed interval");
+        }
+
+        if (deviceCode.status() == DeviceCodeStatus.PENDING) {
+            throw new OAuthTokenException(
+                    "authorization_pending", "The end user has not yet completed the verification step");
+        }
+        if (deviceCode.status() == DeviceCodeStatus.DENIED) {
+            throw new OAuthTokenException("access_denied", "The end user denied this device's authorization request");
+        }
+        if (deviceCode.status() == DeviceCodeStatus.REDEEMED) {
+            throw new OAuthTokenException("invalid_grant", "The device_code has already been used");
+        }
+
+        // Only DeviceCodeStatus.APPROVED reaches here.
+        deviceCode.redeem(now);
+        deviceCodeRepository.save(deviceCode);
+
+        SigningKey signingKey = currentSigningKey(tenantId);
+        byte[] privateKeyDer = privateKeyEncryptor.decrypt(signingKey.encryptedPrivateKey());
+
+        String accessToken = buildAccessToken(
+                command.issuer(),
+                deviceCode.userId().value().toString(),
+                client.clientId().value(),
+                client.clientId().value(),
+                deviceCode.scopes(),
+                signingKey,
+                privateKeyDer,
+                now);
+
+        String idToken = null;
+        if (deviceCode.scopes().contains(OPENID_SCOPE)) {
+            idToken = buildIdToken(command.issuer(), client, deviceCode.userId(), signingKey, privateKeyDer, now, null);
+        }
+
+        String rawRefreshToken = null;
+        if (deviceCode.scopes().contains(OFFLINE_ACCESS_SCOPE) && client.supportsGrantType(GrantType.REFRESH_TOKEN)) {
+            RawVerificationToken rawToken = RawVerificationToken.generate();
+            TokenHash tokenHash = verificationTokenHasher.hash(rawToken);
+            RefreshToken refreshToken = RefreshToken.issueFirst(
+                    tenantId,
+                    client.id(),
+                    deviceCode.userId(),
+                    tokenHash,
+                    deviceCode.scopes(),
+                    now,
+                    REFRESH_TOKEN_FAMILY_VALIDITY);
+            refreshTokenRepository.save(refreshToken);
+            rawRefreshToken = rawToken.value();
+        }
+
+        return new TokenResult(accessToken, ACCESS_TOKEN_VALIDITY.toSeconds(), idToken, rawRefreshToken);
+    }
+
+    /**
+     * Authenticates the client for the device code grant, accepting exactly one of two shapes:
+     * HTTP Basic credentials (for a confidential client, mirroring {@link #authenticateClient}) or
+     * a bare {@link TokenCommand#clientId()} form field (for a public client) - never both, never
+     * neither. Kept as its own self-contained method, rather than folded into {@link
+     * #authenticateClient}, so that grant's simpler confidential-only contract (and its NPE-unsafe
+     * direct call to {@link ClientSecretHasher#matches}) never has to reason about a {@code null}
+     * {@link OAuthClient#clientSecretHash()} at all - see {@code
+     * RequestDeviceAuthorizationUseCase#authenticateClient}, which this mirrors exactly.
+     */
+    private OAuthClient authenticateClientForDeviceCodeGrant(TokenCommand command, TenantId tenantId) {
+        boolean hasBasicAuth = !isBlank(command.basicAuthClientId()) && !isBlank(command.basicAuthClientSecret());
+        if (hasBasicAuth) {
+            return authenticateConfidentialDeviceClient(command, tenantId);
+        }
+        return authenticatePublicDeviceClient(command, tenantId);
+    }
+
+    private OAuthClient authenticateConfidentialDeviceClient(TokenCommand command, TenantId tenantId) {
+        OAuthClient client = resolveClientForDeviceGrant(command.basicAuthClientId(), tenantId);
+        if (client.isPublic()) {
+            throw new OAuthTokenException(
+                    "invalid_client", "This client is public and must not present a client secret");
+        }
+        if (!clientSecretHasher.matches(command.basicAuthClientSecret(), client.clientSecretHash())) {
+            throw new OAuthTokenException("invalid_client", "Client authentication failed");
+        }
+        return requireUsableAndAuthorizedForDeviceGrant(client);
+    }
+
+    private OAuthClient authenticatePublicDeviceClient(TokenCommand command, TenantId tenantId) {
+        if (isBlank(command.clientId())) {
+            throw new OAuthTokenException("invalid_client", "Client authentication is required");
+        }
+        OAuthClient client = resolveClientForDeviceGrant(command.clientId(), tenantId);
+        if (client.isConfidential()) {
+            throw new OAuthTokenException(
+                    "invalid_client", "This client is confidential and must authenticate with its client secret");
+        }
+        return requireUsableAndAuthorizedForDeviceGrant(client);
+    }
+
+    private OAuthClient resolveClientForDeviceGrant(String rawClientId, TenantId tenantId) {
+        ClientId clientId;
+        try {
+            clientId = ClientId.of(rawClientId);
+        } catch (InvalidClientIdException ex) {
+            throw new OAuthTokenException("invalid_client", "Client authentication failed");
+        }
+        return oauthClientRepository
+                .findByClientId(clientId)
+                .filter(candidate -> candidate.tenantId().equals(tenantId))
+                .orElseThrow(() -> new OAuthTokenException("invalid_client", "Client authentication failed"));
+    }
+
+    private OAuthClient requireUsableAndAuthorizedForDeviceGrant(OAuthClient client) {
+        if (!client.isUsable()) {
+            throw new OAuthTokenException("unauthorized_client", "The client is not currently active");
+        }
+        if (!client.supportsGrantType(GrantType.DEVICE_CODE)) {
+            throw new OAuthTokenException(
+                    "unauthorized_client", "The client is not authorized for the device_code grant");
+        }
+        return client;
     }
 
     /** Revokes every token sharing {@code familyId} - the reuse-detection response (see the class

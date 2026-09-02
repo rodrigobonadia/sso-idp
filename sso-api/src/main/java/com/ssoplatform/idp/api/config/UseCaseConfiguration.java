@@ -4,6 +4,7 @@ import com.ssoplatform.idp.application.port.out.AuthorizationCodeRepository;
 import com.ssoplatform.idp.application.port.out.ClientResourceAuthorizationRepository;
 import com.ssoplatform.idp.application.port.out.ClientSecretHasher;
 import com.ssoplatform.idp.application.port.out.CodeVerifierValidator;
+import com.ssoplatform.idp.application.port.out.DeviceCodeRepository;
 import com.ssoplatform.idp.application.port.out.EmailSender;
 import com.ssoplatform.idp.application.port.out.JwtSigner;
 import com.ssoplatform.idp.application.port.out.JwtVerifier;
@@ -20,6 +21,9 @@ import com.ssoplatform.idp.application.port.out.UserRepository;
 import com.ssoplatform.idp.application.port.out.VerificationTokenHasher;
 import com.ssoplatform.idp.application.port.out.VerificationTokenRepository;
 import com.ssoplatform.idp.application.usecase.authorization.AuthorizeUseCase;
+import com.ssoplatform.idp.application.usecase.device.DecideDeviceAuthorizationUseCase;
+import com.ssoplatform.idp.application.usecase.device.FindDeviceAuthorizationUseCase;
+import com.ssoplatform.idp.application.usecase.device.RequestDeviceAuthorizationUseCase;
 import com.ssoplatform.idp.application.usecase.signingkey.GenerateSigningKeyUseCase;
 import com.ssoplatform.idp.application.usecase.signingkey.ListSigningKeysUseCase;
 import com.ssoplatform.idp.application.usecase.tenant.CreateTenantUseCase;
@@ -144,6 +148,7 @@ public class UseCaseConfiguration {
             RefreshTokenRepository refreshTokenRepository,
             ResourceRepository resourceRepository,
             ClientResourceAuthorizationRepository clientResourceAuthorizationRepository,
+            DeviceCodeRepository deviceCodeRepository,
             VerificationTokenHasher verificationTokenHasher,
             CodeVerifierValidator codeVerifierValidator,
             SigningKeyRepository signingKeyRepository,
@@ -156,11 +161,33 @@ public class UseCaseConfiguration {
                 refreshTokenRepository,
                 resourceRepository,
                 clientResourceAuthorizationRepository,
+                deviceCodeRepository,
                 verificationTokenHasher,
                 codeVerifierValidator,
                 signingKeyRepository,
                 privateKeyEncryptor,
                 jwtSigner);
+    }
+
+    @Bean
+    public RequestDeviceAuthorizationUseCase requestDeviceAuthorizationUseCase(
+            OAuthClientRepository oauthClientRepository,
+            ClientSecretHasher clientSecretHasher,
+            DeviceCodeRepository deviceCodeRepository,
+            VerificationTokenHasher verificationTokenHasher) {
+        return new RequestDeviceAuthorizationUseCase(
+                oauthClientRepository, clientSecretHasher, deviceCodeRepository, verificationTokenHasher);
+    }
+
+    @Bean
+    public FindDeviceAuthorizationUseCase findDeviceAuthorizationUseCase(
+            DeviceCodeRepository deviceCodeRepository, OAuthClientRepository oauthClientRepository) {
+        return new FindDeviceAuthorizationUseCase(deviceCodeRepository, oauthClientRepository);
+    }
+
+    @Bean
+    public DecideDeviceAuthorizationUseCase decideDeviceAuthorizationUseCase(DeviceCodeRepository deviceCodeRepository) {
+        return new DecideDeviceAuthorizationUseCase(deviceCodeRepository);
     }
 
     @Bean

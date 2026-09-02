@@ -82,7 +82,9 @@ public class TokenController {
             @RequestParam(value = "code_verifier", required = false) String codeVerifier,
             @RequestParam(value = "refresh_token", required = false) String refreshToken,
             @RequestParam(value = "resource", required = false) String resource,
-            @RequestParam(value = "scope", required = false) String scope) {
+            @RequestParam(value = "scope", required = false) String scope,
+            @RequestParam(value = "device_code", required = false) String deviceCode,
+            @RequestParam(value = "client_id", required = false) String clientId) {
         TenantSummary tenant = tenantContext.tenant().orElseThrow(TenantRequiredException::new);
         String[] clientCredentials = parseBasicAuth(authorizationHeader);
 
@@ -96,6 +98,8 @@ public class TokenController {
                 refreshToken,
                 resource,
                 scope,
+                deviceCode,
+                clientId,
                 clientCredentials == null ? null : clientCredentials[0],
                 clientCredentials == null ? null : clientCredentials[1]);
 

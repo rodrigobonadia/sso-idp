@@ -2,6 +2,7 @@ package com.ssoplatform.idp.application.port.out;
 
 import com.ssoplatform.idp.domain.oauth.ClientId;
 import com.ssoplatform.idp.domain.oauth.OAuthClient;
+import com.ssoplatform.idp.domain.oauth.OAuthClientId;
 import java.util.Optional;
 
 /**
@@ -20,10 +21,17 @@ import java.util.Optional;
  * directly via SQL for now (see {@code architecture_decisions.md}) - but is included here to keep
  * this port's shape consistent with every other repository port in the project, ready for Phase
  * 6's admin console to call it directly with no port-level changes needed.
+ *
+ * <p>{@link #findById} was added in the Device Authorization Grant phase for {@code
+ * FindDeviceAuthorizationUseCase}, which only ever has a {@code DeviceCode}'s internal {@link
+ * OAuthClientId} in hand (never the public-facing {@link ClientId}) and needs the client's display
+ * name for the verification page.
  */
 public interface OAuthClientRepository {
 
     OAuthClient save(OAuthClient client);
 
     Optional<OAuthClient> findByClientId(ClientId clientId);
+
+    Optional<OAuthClient> findById(OAuthClientId id);
 }

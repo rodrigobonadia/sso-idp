@@ -13,9 +13,13 @@ import java.util.List;
  * architecture_decisions.md}, Phase 3.5 scope decision). {@code userinfo_endpoint} was added in
  * Phase 3.7, once {@code GET /userinfo} actually existed to be advertised; {@code
  * grant_types_supported} grew from just {@code authorization_code} to also list {@code
- * refresh_token} and {@code client_credentials} once Phase 3.6 and Phase 3.8 respectively made
- * those grants real (the {@code refresh_token} addition being a small drive-by correction to a
- * gap Phase 3.6 itself left in this document - see {@code architecture_decisions.md}).
+ * refresh_token}, {@code client_credentials}, and {@code
+ * urn:ietf:params:oauth:grant-type:device_code} once Phase 3.6, Phase 3.8, and Phase 3.9
+ * respectively made those grants real (the {@code refresh_token} addition being a small drive-by
+ * correction to a gap Phase 3.6 itself left in this document - see {@code
+ * architecture_decisions.md}). {@code device_authorization_endpoint} (RFC 8628 §4) and the
+ * {@code "none"} entry in {@code token_endpoint_auth_methods_supported} were both added in Phase
+ * 3.9 alongside public client support - see {@code OAuthClient#isPublic()}.
  *
  * <p>snake_case field names are mandated by the spec (like {@code TokenResponse}), hence the
  * explicit {@link JsonProperty} annotations.
@@ -24,6 +28,7 @@ public record DiscoveryResponse(
         String issuer,
         @JsonProperty("authorization_endpoint") String authorizationEndpoint,
         @JsonProperty("token_endpoint") String tokenEndpoint,
+        @JsonProperty("device_authorization_endpoint") String deviceAuthorizationEndpoint,
         @JsonProperty("jwks_uri") String jwksUri,
         @JsonProperty("userinfo_endpoint") String userinfoEndpoint,
         @JsonProperty("scopes_supported") List<String> scopesSupported,

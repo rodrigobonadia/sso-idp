@@ -14,6 +14,7 @@ import com.ssoplatform.idp.application.port.out.AuthorizationCodeRepository;
 import com.ssoplatform.idp.application.port.out.ClientResourceAuthorizationRepository;
 import com.ssoplatform.idp.application.port.out.ClientSecretHasher;
 import com.ssoplatform.idp.application.port.out.CodeVerifierValidator;
+import com.ssoplatform.idp.application.port.out.DeviceCodeRepository;
 import com.ssoplatform.idp.application.port.out.JwtSigner;
 import com.ssoplatform.idp.application.port.out.OAuthClientRepository;
 import com.ssoplatform.idp.application.port.out.PrivateKeyEncryptor;
@@ -23,6 +24,9 @@ import com.ssoplatform.idp.application.port.out.SigningKeyRepository;
 import com.ssoplatform.idp.application.port.out.VerificationTokenHasher;
 import com.ssoplatform.idp.domain.authorization.AuthorizationCode;
 import com.ssoplatform.idp.domain.authorization.CodeChallenge;
+import com.ssoplatform.idp.domain.devicecode.DeviceCode;
+import com.ssoplatform.idp.domain.devicecode.DeviceCodeStatus;
+import com.ssoplatform.idp.domain.devicecode.UserCode;
 import com.ssoplatform.idp.domain.oauth.ClientId;
 import com.ssoplatform.idp.domain.oauth.ClientSecretHash;
 import com.ssoplatform.idp.domain.oauth.GrantType;
@@ -65,6 +69,7 @@ class TokenUseCaseTest {
     private static final String CODE_VALUE = "aVeryLongRawAuthorizationCodeValue12345";
     private static final String CODE_VERIFIER = "aVeryLongCodeVerifierValue1234567890abcdef";
     private static final String REFRESH_TOKEN_VALUE = "aVeryLongRawRefreshTokenValue1234567890";
+    private static final String DEVICE_CODE_VALUE = "aVeryLongRawDeviceCodeValue1234567890abcdef";
     private static final String RESOURCE_IDENTIFIER_VALUE = "https://api.example.com/orders";
     private static final String ISSUER = "http://acme.localhost:8080";
     private static final String SIGNED_JWT = "header.payload.signature";
@@ -86,6 +91,9 @@ class TokenUseCaseTest {
 
     @Mock
     private ClientResourceAuthorizationRepository clientResourceAuthorizationRepository;
+
+    @Mock
+    private DeviceCodeRepository deviceCodeRepository;
 
     @Mock
     private VerificationTokenHasher verificationTokenHasher;
@@ -113,6 +121,7 @@ class TokenUseCaseTest {
                 refreshTokenRepository,
                 resourceRepository,
                 clientResourceAuthorizationRepository,
+                deviceCodeRepository,
                 verificationTokenHasher,
                 codeVerifierValidator,
                 signingKeyRepository,
@@ -172,12 +181,12 @@ class TokenUseCaseTest {
 
     private static TokenCommand validCommand() {
         return new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null, null, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
     }
 
     private static TokenCommand validRefreshCommand() {
         return new TokenCommand(
-                TENANT_ID.value(), ISSUER, "refresh_token", null, null, null, REFRESH_TOKEN_VALUE, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "refresh_token", null, null, null, REFRESH_TOKEN_VALUE, null, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
     }
 
     /** Wires the mocks so a fully valid authorization_code request succeeds, for tests that only vary one thing. */
@@ -333,7 +342,7 @@ class TokenUseCaseTest {
     @Test
     void rejectsAnUnsupportedGrantType() {
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "password", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "password", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null, null, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -344,7 +353,7 @@ class TokenUseCaseTest {
     @Test
     void rejectsWhenNoBasicAuthCredentialsArePresent() {
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null, null, null, null, null);
+                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null, null, null, null, null, null, null);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -355,7 +364,7 @@ class TokenUseCaseTest {
     @Test
     void rejectsAMalformedBasicAuthClientId() {
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null, null, null, "!!", CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null, null, null, null, null, "!!", CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -437,7 +446,7 @@ class TokenUseCaseTest {
         when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
 
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", "  ", REDIRECT_URI_VALUE, CODE_VERIFIER, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "authorization_code", "  ", REDIRECT_URI_VALUE, CODE_VERIFIER, null, null, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -451,7 +460,7 @@ class TokenUseCaseTest {
         when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
 
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, "  ", CODE_VERIFIER, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, "  ", CODE_VERIFIER, null, null, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -465,7 +474,7 @@ class TokenUseCaseTest {
         when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
 
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, "  ", null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, "  ", null, null, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -479,7 +488,7 @@ class TokenUseCaseTest {
         when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
 
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", "!", REDIRECT_URI_VALUE, CODE_VERIFIER, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "authorization_code", "!", REDIRECT_URI_VALUE, CODE_VERIFIER, null, null, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -558,7 +567,7 @@ class TokenUseCaseTest {
         when(authorizationCodeRepository.findByCodeHash(TokenHash.of("hashed-code"))).thenReturn(Optional.of(code));
 
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, "not a uri", CODE_VERIFIER, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, "not a uri", CODE_VERIFIER, null, null, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -686,7 +695,7 @@ class TokenUseCaseTest {
         when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
 
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "refresh_token", null, null, null, "  ", null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "refresh_token", null, null, null, "  ", null, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -700,7 +709,7 @@ class TokenUseCaseTest {
         when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
 
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "refresh_token", null, null, null, "!", null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "refresh_token", null, null, null, "!", null, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -818,7 +827,7 @@ class TokenUseCaseTest {
     private static TokenCommand clientCredentialsCommand(String resource, String scope) {
         return new TokenCommand(
                 TENANT_ID.value(), ISSUER, "client_credentials", null, null, null, null, resource, scope,
-                CLIENT_ID_VALUE, CLIENT_SECRET);
+                null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
     }
 
     /** Wires the mocks so a fully valid client_credentials request succeeds, for tests that only vary one thing. */
@@ -1003,6 +1012,264 @@ class TokenUseCaseTest {
         when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
 
         assertThatThrownBy(() -> useCase.execute(clientCredentialsCommand(RESOURCE_IDENTIFIER_VALUE, null)))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("unauthorized_client"));
+    }
+
+    private static OAuthClient confidentialDeviceClient() {
+        return OAuthClient.register(
+                TENANT_ID,
+                ClientId.of(CLIENT_ID_VALUE),
+                ClientSecretHash.of("stored-hash"),
+                "Acme Device App",
+                Set.of(),
+                Set.of("openid", "profile"),
+                Set.of(GrantType.DEVICE_CODE));
+    }
+
+    private static OAuthClient publicDeviceClient() {
+        return OAuthClient.register(
+                TENANT_ID,
+                ClientId.of(CLIENT_ID_VALUE),
+                null,
+                "Acme CLI",
+                Set.of(),
+                Set.of("openid", "profile"),
+                Set.of(GrantType.DEVICE_CODE));
+    }
+
+    private static DeviceCode deviceCodeWithStatus(OAuthClient client, DeviceCodeStatus status, Set<String> scopes) {
+        DeviceCode deviceCode = DeviceCode.request(
+                TENANT_ID,
+                client.id(),
+                TokenHash.of("hashed-device-code"),
+                UserCode.of("WDJP-MX9K"),
+                scopes,
+                Instant.now(),
+                Duration.ofMinutes(10));
+        if (status == DeviceCodeStatus.APPROVED || status == DeviceCodeStatus.REDEEMED) {
+            deviceCode.approve(USER_ID, Instant.now());
+        }
+        if (status == DeviceCodeStatus.DENIED) {
+            deviceCode.deny(Instant.now());
+        }
+        if (status == DeviceCodeStatus.REDEEMED) {
+            deviceCode.redeem(Instant.now());
+        }
+        return deviceCode;
+    }
+
+    private static TokenCommand confidentialDeviceCodeCommand() {
+        return new TokenCommand(
+                TENANT_ID.value(), ISSUER, "urn:ietf:params:oauth:grant-type:device_code", null, null, null, null,
+                null, null, DEVICE_CODE_VALUE, null, CLIENT_ID_VALUE, CLIENT_SECRET);
+    }
+
+    private static TokenCommand publicDeviceCodeCommand() {
+        return new TokenCommand(
+                TENANT_ID.value(), ISSUER, "urn:ietf:params:oauth:grant-type:device_code", null, null, null, null,
+                null, null, DEVICE_CODE_VALUE, CLIENT_ID_VALUE, null, null);
+    }
+
+    /** Wires the mocks so a fully valid device_code poll succeeds, for tests that only vary one thing. */
+    private void stubDeviceHappyPathUpTo(OAuthClient client, DeviceCode deviceCode) {
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        if (client.isConfidential()) {
+            when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+        }
+        when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(TokenHash.of("hashed-device-code"));
+        when(deviceCodeRepository.findByDeviceCodeHash(TokenHash.of("hashed-device-code")))
+                .thenReturn(Optional.of(deviceCode));
+        when(deviceCodeRepository.save(any(DeviceCode.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(signingKeyRepository.findCurrentByTenantId(TENANT_ID)).thenReturn(Optional.of(currentSigningKey()));
+        when(privateKeyEncryptor.decrypt(any(EncryptedPrivateKeyMaterial.class))).thenReturn(new byte[] {1, 2, 3});
+        when(jwtSigner.sign(any(), any(), anyString())).thenReturn(SIGNED_JWT);
+    }
+
+    @Test
+    void issuesTokensWhenTheDeviceCodeIsApproved() {
+        OAuthClient client = confidentialDeviceClient();
+        DeviceCode deviceCode = deviceCodeWithStatus(client, DeviceCodeStatus.APPROVED, Set.of("openid", "profile"));
+        stubDeviceHappyPathUpTo(client, deviceCode);
+
+        TokenResult result = useCase.execute(confidentialDeviceCodeCommand());
+
+        assertThat(result.accessToken()).isEqualTo(SIGNED_JWT);
+        assertThat(result.idToken()).isEqualTo(SIGNED_JWT);
+        assertThat(deviceCode.status()).isEqualTo(DeviceCodeStatus.REDEEMED);
+    }
+
+    @Test
+    void issuesTokensForAnApprovedDeviceCodeBelongingToAPublicClient() {
+        OAuthClient client = publicDeviceClient();
+        DeviceCode deviceCode = deviceCodeWithStatus(client, DeviceCodeStatus.APPROVED, Set.of("profile"));
+        stubDeviceHappyPathUpTo(client, deviceCode);
+
+        TokenResult result = useCase.execute(publicDeviceCodeCommand());
+
+        assertThat(result.accessToken()).isEqualTo(SIGNED_JWT);
+        assertThat(deviceCode.status()).isEqualTo(DeviceCodeStatus.REDEEMED);
+    }
+
+    @Test
+    void returnsAuthorizationPendingWhenTheUserHasNotYetActed() {
+        OAuthClient client = confidentialDeviceClient();
+        DeviceCode deviceCode = deviceCodeWithStatus(client, DeviceCodeStatus.PENDING, Set.of("openid"));
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+        when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(TokenHash.of("hashed-device-code"));
+        when(deviceCodeRepository.findByDeviceCodeHash(TokenHash.of("hashed-device-code")))
+                .thenReturn(Optional.of(deviceCode));
+
+        assertThatThrownBy(() -> useCase.execute(confidentialDeviceCodeCommand()))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("authorization_pending"));
+    }
+
+    @Test
+    void returnsAccessDeniedWhenTheUserDenied() {
+        OAuthClient client = confidentialDeviceClient();
+        DeviceCode deviceCode = deviceCodeWithStatus(client, DeviceCodeStatus.DENIED, Set.of("openid"));
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+        when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(TokenHash.of("hashed-device-code"));
+        when(deviceCodeRepository.findByDeviceCodeHash(TokenHash.of("hashed-device-code")))
+                .thenReturn(Optional.of(deviceCode));
+
+        assertThatThrownBy(() -> useCase.execute(confidentialDeviceCodeCommand()))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("access_denied"));
+    }
+
+    @Test
+    void returnsInvalidGrantWhenTheDeviceCodeWasAlreadyRedeemed() {
+        OAuthClient client = confidentialDeviceClient();
+        DeviceCode deviceCode = deviceCodeWithStatus(client, DeviceCodeStatus.REDEEMED, Set.of("openid"));
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+        when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(TokenHash.of("hashed-device-code"));
+        when(deviceCodeRepository.findByDeviceCodeHash(TokenHash.of("hashed-device-code")))
+                .thenReturn(Optional.of(deviceCode));
+
+        assertThatThrownBy(() -> useCase.execute(confidentialDeviceCodeCommand()))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("invalid_grant"));
+    }
+
+    @Test
+    void returnsExpiredTokenForADeviceCodePastItsExpiry() {
+        OAuthClient client = confidentialDeviceClient();
+        DeviceCode deviceCode = DeviceCode.request(
+                TENANT_ID,
+                client.id(),
+                TokenHash.of("hashed-device-code"),
+                UserCode.of("WDJP-MX9K"),
+                Set.of("openid"),
+                Instant.now().minus(Duration.ofMinutes(20)),
+                Duration.ofMinutes(10));
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+        when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(TokenHash.of("hashed-device-code"));
+        when(deviceCodeRepository.findByDeviceCodeHash(TokenHash.of("hashed-device-code")))
+                .thenReturn(Optional.of(deviceCode));
+
+        assertThatThrownBy(() -> useCase.execute(confidentialDeviceCodeCommand()))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("expired_token"));
+    }
+
+    @Test
+    void returnsSlowDownWhenPolledFasterThanTheAllowedInterval() {
+        OAuthClient client = confidentialDeviceClient();
+        DeviceCode deviceCode = deviceCodeWithStatus(client, DeviceCodeStatus.PENDING, Set.of("openid"));
+        deviceCode.recordPoll(Instant.now());
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+        when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(TokenHash.of("hashed-device-code"));
+        when(deviceCodeRepository.findByDeviceCodeHash(TokenHash.of("hashed-device-code")))
+                .thenReturn(Optional.of(deviceCode));
+        when(deviceCodeRepository.save(any(DeviceCode.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertThatThrownBy(() -> useCase.execute(confidentialDeviceCodeCommand()))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("slow_down"));
+    }
+
+    @Test
+    void rejectsAnUnknownDeviceCode() {
+        OAuthClient client = confidentialDeviceClient();
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+        when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(TokenHash.of("hashed-device-code"));
+        when(deviceCodeRepository.findByDeviceCodeHash(TokenHash.of("hashed-device-code"))).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> useCase.execute(confidentialDeviceCodeCommand()))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("invalid_grant"));
+    }
+
+    @Test
+    void rejectsADeviceCodeIssuedToADifferentClient() {
+        OAuthClient client = confidentialDeviceClient();
+        OAuthClient otherClient = OAuthClient.register(
+                TENANT_ID,
+                ClientId.of("other-client-app"),
+                ClientSecretHash.of("other-hash"),
+                "Other App",
+                Set.of(),
+                Set.of("openid"),
+                Set.of(GrantType.DEVICE_CODE));
+        DeviceCode deviceCode = deviceCodeWithStatus(otherClient, DeviceCodeStatus.APPROVED, Set.of("openid"));
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+        when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(TokenHash.of("hashed-device-code"));
+        when(deviceCodeRepository.findByDeviceCodeHash(TokenHash.of("hashed-device-code")))
+                .thenReturn(Optional.of(deviceCode));
+
+        assertThatThrownBy(() -> useCase.execute(confidentialDeviceCodeCommand()))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("invalid_grant"));
+    }
+
+    @Test
+    void rejectsAPublicClientThatPresentsBasicAuthCredentials() {
+        OAuthClient client = publicDeviceClient();
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+
+        assertThatThrownBy(() -> useCase.execute(confidentialDeviceCodeCommand()))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("invalid_client"));
+    }
+
+    @Test
+    void rejectsAConfidentialClientThatOmitsBasicAuthCredentials() {
+        OAuthClient client = confidentialDeviceClient();
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+
+        assertThatThrownBy(() -> useCase.execute(publicDeviceCodeCommand()))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("invalid_client"));
+    }
+
+    @Test
+    void rejectsWhenNeitherBasicAuthNorClientIdIsPresent() {
+        TokenCommand command = new TokenCommand(
+                TENANT_ID.value(), ISSUER, "urn:ietf:params:oauth:grant-type:device_code", null, null, null, null,
+                null, null, DEVICE_CODE_VALUE, null, null, null);
+
+        assertThatThrownBy(() -> useCase.execute(command))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("invalid_client"));
+        verify(oauthClientRepository, never()).findByClientId(any());
+    }
+
+    @Test
+    void rejectsAClientNotAuthorizedForTheDeviceCodeGrant() {
+        OAuthClient client = activeClient(); // only supports AUTHORIZATION_CODE
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+
+        assertThatThrownBy(() -> useCase.execute(confidentialDeviceCodeCommand()))
                 .isInstanceOf(OAuthTokenException.class)
                 .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("unauthorized_client"));
     }

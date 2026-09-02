@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8" />
+    <title>Enter device code</title>
+</head>
+<body>
+<h1>Connect a device</h1>
+<p>Enter the code shown on your device.</p>
+
+<p th:if="${errorMessage}" th:text="${errorMessage}" style="color: red;"></p>
+
+<form th:action="@{/device}" method="post">
+    <div>
+        <label for="user_code">Code</label>
+        <input type="text" id="user_code" name="user_code" th:value="${userCode}"
+               placeholder="XXXX-XXXX" autocomplete="off" required="required" />
+    </div>
+    <button type="submit">Continue</button>
+</form>
+</body>
+</html>

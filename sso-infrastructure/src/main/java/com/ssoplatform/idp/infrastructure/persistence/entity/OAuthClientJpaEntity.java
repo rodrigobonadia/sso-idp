@@ -38,7 +38,9 @@ public class OAuthClientJpaEntity {
     @Column(name = "client_id", nullable = false, length = 128)
     private String clientId;
 
-    @Column(name = "client_secret_hash", nullable = false, length = 255)
+    /** {@code null} for a public client - see {@code OAuthClient#isPublic()}. Made nullable by
+     * {@code V12__make_oauth_client_secret_hash_nullable.sql} (Device Authorization Grant phase). */
+    @Column(name = "client_secret_hash", length = 255)
     private String clientSecretHash;
 
     @Column(name = "name", nullable = false, length = 150)

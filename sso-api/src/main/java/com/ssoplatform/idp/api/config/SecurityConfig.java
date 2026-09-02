@@ -11,6 +11,7 @@ import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.security.web.util.matcher.AnyRequestMatcher;
+import org.springframework.security.web.util.matcher.OrRequestMatcher;
 
 /**
  * Application-wide HTTP security policy.
@@ -46,19 +47,26 @@ import org.springframework.security.web.util.matcher.AnyRequestMatcher;
  * friendlier redirect-to-login experience can be added later without changing the authentication
  * mechanism itself.
  *
- * <p>{@code GET /authorize} (Phase 3.3) is the one deliberate exception:
- * {@code .exceptionHandling().defaultAuthenticationEntryPointFor(...)} wires a {@link
- * LoginUrlAuthenticationEntryPoint} scoped to just that path, so an unauthenticated request there
- * redirects to {@code /login} instead of returning 403 - the standard OAuth UX, where a user who
- * isn't signed in yet still needs to be able to complete the authorization flow after logging in.
- * This works together with a mechanism Spring Security already provides "for free" regardless of
- * which entry point is configured: {@code ExceptionTranslationFilter} always calls {@code
- * RequestCache#saveRequest(...)} (the default {@code HttpSessionRequestCache}) before invoking
- * whichever entry point applies, for every unauthenticated request to a protected path - it is only
- * ever USED here, on the {@code /authorize} path, because {@code LoginPageController}'s {@code
- * POST /login} handler explicitly checks that cache after establishing a session and, if a request
- * was saved, redirects there instead of to the usual {@code /account} - see that controller's
- * Javadoc for the resume side of this flow.
+ * <p>{@code GET /authorize} (Phase 3.3) and {@code /device} (the Device Authorization Grant's
+ * verification page, Phase 3.9) are the deliberate exceptions: {@code
+ * .exceptionHandling().defaultAuthenticationEntryPointFor(...)} wires a single {@link
+ * LoginUrlAuthenticationEntryPoint}, scoped to an {@link OrRequestMatcher} covering BOTH paths, so
+ * an unauthenticated request to either redirects to {@code /login} instead of returning 403 - the
+ * standard OAuth UX, where a user who isn't signed in yet still needs to be able to complete the
+ * flow after logging in. This works together with a mechanism Spring Security already provides
+ * "for free" regardless of which entry point is configured: {@code ExceptionTranslationFilter}
+ * always calls {@code RequestCache#saveRequest(...)} (the default {@code HttpSessionRequestCache})
+ * before invoking whichever entry point applies, for every unauthenticated request to a protected
+ * path - it is only ever USED here, on these two paths, because {@code LoginPageController}'s
+ * {@code POST /login} handler explicitly checks that cache after establishing a session and, if a
+ * request was saved, redirects there instead of to the usual {@code /account} - see that
+ * controller's Javadoc for the resume side of this flow. Only {@code GET /device} is covered
+ * (never {@code POST /device}, {@code /device/allow}, or {@code /device/deny}) for the same reason
+ * only {@code GET /authorize} ever needed this: {@code LoginPageController}'s resume is a plain
+ * redirect to the saved URL, which replays as a GET and would silently drop a POST body - by the
+ * time a user reaches one of this platform's own device-verification POSTs, the {@code GET
+ * /device} step they came from has already established their session, so those POSTs simply fall
+ * under the default {@code anyRequest().authenticated()} rule below like any other protected POST.
  *
  * <p><b>{@code defaultAuthenticationEntryPointFor} gotcha (found by a real {@code mvn clean
  * verify} run, not by inspection):</b> {@link
@@ -115,6 +123,14 @@ import org.springframework.security.web.util.matcher.AnyRequestMatcher;
  * {@code anyRequest().authenticated()} to check here. It needs no CSRF exemption of its own, unlike {@code
  * /token}: it is a {@code GET} request, and Spring Security's CSRF filter only ever protects the unsafe
  * HTTP methods to begin with.
+ *
+ * <p>{@code /device_authorization} (Phase 3.9, RFC 8628) is permitted unauthenticated and CSRF-exempt
+ * for the exact same reason as {@code /token}: the caller is the OAuth CLIENT itself (a device with no
+ * browser at all, in the common case), authenticated by {@code RequestDeviceAuthorizationUseCase} via
+ * HTTP Basic or a public client's bare {@code client_id} - never a Spring Security session - so there is
+ * no resource-owner session to require and no browser cookie a CSRF attack could ride along with.
+ * {@code /device} (the human-facing verification page for the SAME grant) is the opposite: it very much
+ * needs a resource-owner session, exactly like {@code /authorize} - see the entry-point paragraph above.
  */
 @Configuration
 @EnableWebSecurity
@@ -124,7 +140,7 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http.csrf(csrf -> csrf.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
-                        .ignoringRequestMatchers("/token"))
+                        .ignoringRequestMatchers("/token", "/device_authorization"))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(
                                 "/actuator/**",
@@ -138,6 +154,7 @@ public class SecurityConfig {
                                 "/reset-password",
                                 "/token",
                                 "/userinfo",
+                                "/device_authorization",
                                 "/api/register",
                                 "/api/verify-email",
                                 "/api/login",
@@ -148,7 +165,9 @@ public class SecurityConfig {
                         .authenticated())
                 .exceptionHandling(exceptions -> exceptions
                         .defaultAuthenticationEntryPointFor(
-                                new LoginUrlAuthenticationEntryPoint("/login"), new AntPathRequestMatcher("/authorize"))
+                                new LoginUrlAuthenticationEntryPoint("/login"),
+                                new OrRequestMatcher(
+                                        new AntPathRequestMatcher("/authorize"), new AntPathRequestMatcher("/device")))
                         .defaultAuthenticationEntryPointFor(
                                 new Http403ForbiddenEntryPoint(), AnyRequestMatcher.INSTANCE))
                 .logout(logout -> logout.logoutUrl("/logout")

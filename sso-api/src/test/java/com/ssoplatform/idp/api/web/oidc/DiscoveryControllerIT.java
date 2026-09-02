@@ -52,6 +52,8 @@ class DiscoveryControllerIT {
                 .andExpect(jsonPath("$.authorization_endpoint")
                         .value("http://acme-discovery.localhost:8080/authorize"))
                 .andExpect(jsonPath("$.token_endpoint").value("http://acme-discovery.localhost:8080/token"))
+                .andExpect(jsonPath("$.device_authorization_endpoint")
+                        .value("http://acme-discovery.localhost:8080/device_authorization"))
                 .andExpect(jsonPath("$.jwks_uri")
                         .value("http://acme-discovery.localhost:8080/.well-known/jwks.json"))
                 .andExpect(jsonPath("$.userinfo_endpoint").value("http://acme-discovery.localhost:8080/userinfo"));
@@ -70,10 +72,15 @@ class DiscoveryControllerIT {
                 .andExpect(jsonPath("$.scopes_supported").value(containsInAnyOrder("openid", "profile", "email")))
                 .andExpect(jsonPath("$.response_types_supported").value(contains("code")))
                 .andExpect(jsonPath("$.grant_types_supported")
-                        .value(contains("authorization_code", "refresh_token", "client_credentials")))
+                        .value(contains(
+                                "authorization_code",
+                                "refresh_token",
+                                "client_credentials",
+                                "urn:ietf:params:oauth:grant-type:device_code")))
                 .andExpect(jsonPath("$.subject_types_supported").value(contains("public")))
                 .andExpect(jsonPath("$.id_token_signing_alg_values_supported").value(contains("RS256")))
-                .andExpect(jsonPath("$.token_endpoint_auth_methods_supported").value(contains("client_secret_basic")))
+                .andExpect(jsonPath("$.token_endpoint_auth_methods_supported")
+                        .value(contains("client_secret_basic", "none")))
                 .andExpect(jsonPath("$.code_challenge_methods_supported").value(contains("S256")))
                 .andExpect(jsonPath("$.revocation_endpoint").doesNotExist())
                 .andExpect(jsonPath("$.introspection_endpoint").doesNotExist())
