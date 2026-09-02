@@ -29,6 +29,12 @@ public class UserJpaEntity {
     @Column(name = "email", nullable = false, length = 255)
     private String email;
 
+    @Column(name = "given_name", nullable = false, length = 100)
+    private String givenName;
+
+    @Column(name = "family_name", nullable = false, length = 100)
+    private String familyName;
+
     @Column(name = "password_hash", nullable = false, length = 255)
     private String passwordHash;
 
@@ -50,6 +56,8 @@ public class UserJpaEntity {
             UUID id,
             UUID tenantId,
             String email,
+            String givenName,
+            String familyName,
             String passwordHash,
             UserStatus status,
             int failedLoginAttempts,
@@ -57,6 +65,8 @@ public class UserJpaEntity {
         this.id = id;
         this.tenantId = tenantId;
         this.email = email;
+        this.givenName = givenName;
+        this.familyName = familyName;
         this.passwordHash = passwordHash;
         this.status = status;
         this.failedLoginAttempts = failedLoginAttempts;
@@ -73,6 +83,14 @@ public class UserJpaEntity {
 
     public String getEmail() {
         return email;
+    }
+
+    public String getGivenName() {
+        return givenName;
+    }
+
+    public String getFamilyName() {
+        return familyName;
     }
 
     public String getPasswordHash() {

@@ -86,7 +86,7 @@ class AuthApiControllerIT {
                         })
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
-                                new RegisterRequest("someone@example.com", "Str0ng!Passw0rd"))))
+                                new RegisterRequest("someone@example.com", "Jane", "Doe", "Str0ng!Passw0rd"))))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.email").value("someone@example.com"))
                 .andExpect(jsonPath("$.userId").exists());
@@ -117,7 +117,7 @@ class AuthApiControllerIT {
                 })
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(
-                        new RegisterRequest("reverify@example.com", "Str0ng!Passw0rd"))));
+                        new RegisterRequest("reverify@example.com", "Jane", "Doe", "Str0ng!Passw0rd"))));
         String token = extractTokenFromLastMailLog();
 
         mockMvc.perform(post("/api/verify-email")
@@ -136,7 +136,7 @@ class AuthApiControllerIT {
     @Test
     void rejectsRegistrationOfADuplicateEmailWithConflict() throws Exception {
         createTenantUseCase.execute(new CreateTenantCommand("Acme Corp", "acme-dup-email-api"));
-        RegisterRequest request = new RegisterRequest("dup@example.com", "Str0ng!Passw0rd");
+        RegisterRequest request = new RegisterRequest("dup@example.com", "Jane", "Doe", "Str0ng!Passw0rd");
 
         mockMvc.perform(post("/api/register")
                 .with(csrf())
@@ -169,7 +169,8 @@ class AuthApiControllerIT {
                             return request;
                         })
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new RegisterRequest("weak@example.com", "weak"))))
+                        .content(objectMapper.writeValueAsString(
+                                new RegisterRequest("weak@example.com", "Jane", "Doe", "weak"))))
                 .andExpect(status().isBadRequest());
     }
 
@@ -183,7 +184,7 @@ class AuthApiControllerIT {
                         })
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
-                                new RegisterRequest("no-tenant@example.com", "Str0ng!Passw0rd"))))
+                                new RegisterRequest("no-tenant@example.com", "Jane", "Doe", "Str0ng!Passw0rd"))))
                 .andExpect(status().isBadRequest());
     }
 
@@ -199,7 +200,7 @@ class AuthApiControllerIT {
                 })
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(
-                        new RegisterRequest("loginapi@example.com", "Str0ng!Passw0rd"))));
+                        new RegisterRequest("loginapi@example.com", "Jane", "Doe", "Str0ng!Passw0rd"))));
         String token = extractTokenFromLastMailLog();
         mockMvc.perform(post("/api/verify-email")
                 .with(csrf())
@@ -370,7 +371,7 @@ class AuthApiControllerIT {
                     return request;
                 })
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(new RegisterRequest(email, password))));
+                .content(objectMapper.writeValueAsString(new RegisterRequest(email, "Jane", "Doe", password))));
         String token = extractTokenFromLastMailLog();
         mockMvc.perform(post("/api/verify-email")
                 .with(csrf())

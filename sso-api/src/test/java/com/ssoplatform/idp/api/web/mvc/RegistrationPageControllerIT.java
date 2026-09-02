@@ -94,6 +94,8 @@ class RegistrationPageControllerIT {
                             return request;
                         })
                         .param("email", "pageflow@example.com")
+                        .param("givenName", "Jane")
+                        .param("familyName", "Doe")
                         .param("password", "Str0ng!Passw0rd"))
                 .andExpect(status().is3xxRedirection())
                 .andExpect(redirectedUrl("/register/check-email"));
@@ -117,6 +119,8 @@ class RegistrationPageControllerIT {
                             return request;
                         })
                         .param("email", "weakpage@example.com")
+                        .param("givenName", "Jane")
+                        .param("familyName", "Doe")
                         .param("password", "weak"))
                 .andExpect(status().isOk())
                 .andExpect(view().name("register"));

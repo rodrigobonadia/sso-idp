@@ -3,6 +3,7 @@ package com.ssoplatform.idp.infrastructure.persistence.mapper;
 import com.ssoplatform.idp.domain.tenant.TenantId;
 import com.ssoplatform.idp.domain.user.Email;
 import com.ssoplatform.idp.domain.user.HashedPassword;
+import com.ssoplatform.idp.domain.user.PersonName;
 import com.ssoplatform.idp.domain.user.User;
 import com.ssoplatform.idp.domain.user.UserId;
 import com.ssoplatform.idp.infrastructure.persistence.entity.UserJpaEntity;
@@ -17,6 +18,8 @@ public final class UserEntityMapper {
                 user.id().value(),
                 user.tenantId().value(),
                 user.email().value(),
+                user.givenName().value(),
+                user.familyName().value(),
                 user.passwordHash().value(),
                 user.status(),
                 user.failedLoginAttempts(),
@@ -28,6 +31,8 @@ public final class UserEntityMapper {
                 UserId.of(entity.getId()),
                 TenantId.of(entity.getTenantId()),
                 Email.of(entity.getEmail()),
+                PersonName.of(entity.getGivenName()),
+                PersonName.of(entity.getFamilyName()),
                 HashedPassword.of(entity.getPasswordHash()),
                 entity.getStatus(),
                 entity.getFailedLoginAttempts(),

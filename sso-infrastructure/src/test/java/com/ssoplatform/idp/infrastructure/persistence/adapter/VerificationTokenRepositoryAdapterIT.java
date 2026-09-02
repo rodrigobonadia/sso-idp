@@ -6,6 +6,7 @@ import com.ssoplatform.idp.domain.tenant.Tenant;
 import com.ssoplatform.idp.domain.tenant.TenantSlug;
 import com.ssoplatform.idp.domain.user.Email;
 import com.ssoplatform.idp.domain.user.HashedPassword;
+import com.ssoplatform.idp.domain.user.PersonName;
 import com.ssoplatform.idp.domain.user.User;
 import com.ssoplatform.idp.domain.verification.EmailVerificationToken;
 import com.ssoplatform.idp.domain.verification.TokenHash;
@@ -55,7 +56,12 @@ class VerificationTokenRepositoryAdapterIT {
         // email_verification_tokens.user_id has a foreign key to users(id), which in turn needs a tenant.
         Tenant tenant = Tenant.create("Acme Corp", TenantSlug.of("acme-tokens-" + System.nanoTime()));
         tenantRepository.save(tenant);
-        user = User.register(tenant.id(), Email.of("someone@example.com"), HashedPassword.of("$2a$12$hash"));
+        user = User.register(
+                tenant.id(),
+                Email.of("someone@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                HashedPassword.of("$2a$12$hash"));
         userRepository.save(user);
     }
 

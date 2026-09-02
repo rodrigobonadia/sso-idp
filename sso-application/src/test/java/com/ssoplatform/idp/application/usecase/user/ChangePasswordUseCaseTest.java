@@ -14,6 +14,7 @@ import com.ssoplatform.idp.application.port.out.PasswordHasher;
 import com.ssoplatform.idp.application.port.out.UserRepository;
 import com.ssoplatform.idp.domain.tenant.TenantId;
 import com.ssoplatform.idp.domain.user.Email;
+import com.ssoplatform.idp.domain.user.PersonName;
 import com.ssoplatform.idp.domain.user.HashedPassword;
 import com.ssoplatform.idp.domain.user.User;
 import com.ssoplatform.idp.domain.user.WeakPasswordException;
@@ -43,7 +44,12 @@ class ChangePasswordUseCaseTest {
     @BeforeEach
     void setUp() {
         useCase = new ChangePasswordUseCase(userRepository, passwordHasher);
-        user = User.register(TENANT_ID, Email.of("someone@example.com"), OLD_PASSWORD_HASH);
+        user = User.register(
+                TENANT_ID,
+                Email.of("someone@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                OLD_PASSWORD_HASH);
         user.verifyEmail();
         when(userRepository.findById(user.id())).thenReturn(Optional.of(user));
     }

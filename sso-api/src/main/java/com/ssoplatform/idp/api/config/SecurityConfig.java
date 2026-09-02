@@ -108,6 +108,13 @@ import org.springframework.security.web.util.matcher.AnyRequestMatcher;
  * would make this endpoint unusable by every real OAuth client, and there is no cookie-riding
  * attack for the exemption to reopen. This mirrors how every real OAuth2/OIDC server (Spring
  * Authorization Server included) exempts its token endpoint from CSRF for the same reason.
+ *
+ * <p>{@code /userinfo} (Phase 3.7) is permitted unauthenticated for the same underlying reason as {@code
+ * /token}: the caller authenticates via a bearer access token (hand-parsed inside {@code
+ * UserInfoController}/{@code GetUserInfoUseCase}), not a Spring Security session, so there is nothing for
+ * {@code anyRequest().authenticated()} to check here. It needs no CSRF exemption of its own, unlike {@code
+ * /token}: it is a {@code GET} request, and Spring Security's CSRF filter only ever protects the unsafe
+ * HTTP methods to begin with.
  */
 @Configuration
 @EnableWebSecurity
@@ -130,6 +137,7 @@ public class SecurityConfig {
                                 "/forgot-password/**",
                                 "/reset-password",
                                 "/token",
+                                "/userinfo",
                                 "/api/register",
                                 "/api/verify-email",
                                 "/api/login",

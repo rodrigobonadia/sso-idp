@@ -31,6 +31,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class CreateUserUseCaseTest {
 
     private static final String RAW_PASSWORD = "Str0ng!Passw0rd";
+    private static final String GIVEN_NAME = "Jane";
+    private static final String FAMILY_NAME = "Doe";
 
     @Mock
     private UserRepository userRepository;
@@ -60,8 +62,8 @@ class CreateUserUseCaseTest {
         when(passwordHasher.hash(RawPassword.of(RAW_PASSWORD))).thenReturn(hashedPassword);
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        CreateUserResult result =
-                useCase.execute(new CreateUserCommand(tenantId, "Someone@Example.com", RAW_PASSWORD));
+        CreateUserResult result = useCase.execute(
+                new CreateUserCommand(tenantId, "Someone@Example.com", GIVEN_NAME, FAMILY_NAME, RAW_PASSWORD));
 
         assertThat(result.tenantId()).isEqualTo(tenantId);
         assertThat(result.email()).isEqualTo("someone@example.com");
@@ -74,8 +76,8 @@ class CreateUserUseCaseTest {
         UUID unknownTenantId = UUID.randomUUID();
         when(tenantRepository.findById(TenantId.of(unknownTenantId))).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() ->
-                        useCase.execute(new CreateUserCommand(unknownTenantId, "someone@example.com", RAW_PASSWORD)))
+        assertThatThrownBy(() -> useCase.execute(new CreateUserCommand(
+                        unknownTenantId, "someone@example.com", GIVEN_NAME, FAMILY_NAME, RAW_PASSWORD)))
                 .isInstanceOf(TenantNotFoundException.class);
     }
 
@@ -85,8 +87,8 @@ class CreateUserUseCaseTest {
         UUID tenantId = activeTenant.id().value();
         when(tenantRepository.findById(TenantId.of(tenantId))).thenReturn(Optional.of(activeTenant));
 
-        assertThatThrownBy(() ->
-                        useCase.execute(new CreateUserCommand(tenantId, "someone@example.com", RAW_PASSWORD)))
+        assertThatThrownBy(() -> useCase.execute(
+                        new CreateUserCommand(tenantId, "someone@example.com", GIVEN_NAME, FAMILY_NAME, RAW_PASSWORD)))
                 .isInstanceOf(TenantNotActiveException.class);
     }
 
@@ -97,8 +99,8 @@ class CreateUserUseCaseTest {
         when(userRepository.existsByTenantIdAndEmail(activeTenant.id(), Email.of("someone@example.com")))
                 .thenReturn(true);
 
-        assertThatThrownBy(() ->
-                        useCase.execute(new CreateUserCommand(tenantId, "someone@example.com", RAW_PASSWORD)))
+        assertThatThrownBy(() -> useCase.execute(
+                        new CreateUserCommand(tenantId, "someone@example.com", GIVEN_NAME, FAMILY_NAME, RAW_PASSWORD)))
                 .isInstanceOf(DuplicateEmailException.class);
     }
 }

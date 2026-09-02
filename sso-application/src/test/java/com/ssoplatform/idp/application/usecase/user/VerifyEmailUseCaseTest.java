@@ -14,6 +14,7 @@ import com.ssoplatform.idp.application.port.out.VerificationTokenHasher;
 import com.ssoplatform.idp.application.port.out.VerificationTokenRepository;
 import com.ssoplatform.idp.domain.tenant.TenantId;
 import com.ssoplatform.idp.domain.user.Email;
+import com.ssoplatform.idp.domain.user.PersonName;
 import com.ssoplatform.idp.domain.user.HashedPassword;
 import com.ssoplatform.idp.domain.user.User;
 import com.ssoplatform.idp.domain.user.UserId;
@@ -50,8 +51,12 @@ class VerifyEmailUseCaseTest {
     void setUp() {
         useCase = new VerifyEmailUseCase(verificationTokenRepository, verificationTokenHasher, userRepository);
         tokenHash = TokenHash.of("some-hash-value");
-        pendingUser = User.register(TenantId.generate(), Email.of("someone@example.com"), HashedPassword.of(
-                "$2a$10$somehashvalue"));
+        pendingUser = User.register(
+                TenantId.generate(),
+                Email.of("someone@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                HashedPassword.of("$2a$10$somehashvalue"));
         when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(tokenHash);
     }
 

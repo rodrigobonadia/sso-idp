@@ -6,6 +6,7 @@ import com.ssoplatform.idp.domain.tenant.Tenant;
 import com.ssoplatform.idp.domain.tenant.TenantSlug;
 import com.ssoplatform.idp.domain.user.Email;
 import com.ssoplatform.idp.domain.user.HashedPassword;
+import com.ssoplatform.idp.domain.user.PersonName;
 import com.ssoplatform.idp.domain.user.User;
 import com.ssoplatform.idp.infrastructure.InfrastructureTestConfiguration;
 import java.util.Optional;
@@ -47,7 +48,12 @@ class UserRepositoryAdapterIT {
 
     @Test
     void savesAndReloadsAUserById() {
-        User user = User.register(tenant.id(), Email.of("someone@example.com"), HashedPassword.of("$2a$12$hash"));
+        User user = User.register(
+                tenant.id(),
+                Email.of("someone@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                HashedPassword.of("$2a$12$hash"));
 
         userRepository.save(user);
         Optional<User> reloaded = userRepository.findById(user.id());
@@ -55,13 +61,20 @@ class UserRepositoryAdapterIT {
         assertThat(reloaded).isPresent();
         assertThat(reloaded.get().tenantId()).isEqualTo(tenant.id());
         assertThat(reloaded.get().email()).isEqualTo(user.email());
+        assertThat(reloaded.get().givenName()).isEqualTo(user.givenName());
+        assertThat(reloaded.get().familyName()).isEqualTo(user.familyName());
         assertThat(reloaded.get().status()).isEqualTo(user.status());
         assertThat(reloaded.get().failedLoginAttempts()).isZero();
     }
 
     @Test
     void findByTenantIdAndEmailLocatesAPersistedUser() {
-        User user = User.register(tenant.id(), Email.of("findme@example.com"), HashedPassword.of("$2a$12$hash"));
+        User user = User.register(
+                tenant.id(),
+                Email.of("findme@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                HashedPassword.of("$2a$12$hash"));
         userRepository.save(user);
 
         assertThat(userRepository.findByTenantIdAndEmail(tenant.id(), Email.of("findme@example.com")))
@@ -73,7 +86,12 @@ class UserRepositoryAdapterIT {
 
     @Test
     void existsByTenantIdAndEmailIsFalseForAnotherTenantWithTheSameEmail() {
-        User user = User.register(tenant.id(), Email.of("scoped@example.com"), HashedPassword.of("$2a$12$hash"));
+        User user = User.register(
+                tenant.id(),
+                Email.of("scoped@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                HashedPassword.of("$2a$12$hash"));
         userRepository.save(user);
 
         Tenant otherTenant = Tenant.create("Other Corp", TenantSlug.of("other-corp-" + System.nanoTime()));
@@ -87,7 +105,12 @@ class UserRepositoryAdapterIT {
 
     @Test
     void reloadsALockedUserWithItsFailedAttemptsPreserved() {
-        User user = User.register(tenant.id(), Email.of("locked@example.com"), HashedPassword.of("$2a$12$hash"));
+        User user = User.register(
+                tenant.id(),
+                Email.of("locked@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                HashedPassword.of("$2a$12$hash"));
         user.verifyEmail();
         for (int i = 0; i < User.MAX_FAILED_LOGIN_ATTEMPTS; i++) {
             user.recordFailedLogin();

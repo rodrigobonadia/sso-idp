@@ -49,8 +49,13 @@ public class RegistrationPageController {
     public String submitRegistration(@ModelAttribute("registrationForm") RegistrationForm form, Model model) {
         TenantSummary tenant = requireTenant();
         try {
-            registerUserUseCase.execute(
-                    new RegisterUserCommand(tenant.tenantId(), tenant.slug(), form.getEmail(), form.getPassword()));
+            registerUserUseCase.execute(new RegisterUserCommand(
+                    tenant.tenantId(),
+                    tenant.slug(),
+                    form.getEmail(),
+                    form.getGivenName(),
+                    form.getFamilyName(),
+                    form.getPassword()));
             return "redirect:/register/check-email";
         } catch (DuplicateEmailException | DomainException ex) {
             // DomainException covers WeakPasswordException/InvalidEmailException: user-input

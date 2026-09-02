@@ -56,7 +56,7 @@ class SsoApplicationIT {
                 createTenantUseCase.execute(new CreateTenantCommand("Acme Corp", "acme-e2e-" + System.nanoTime()));
 
         CreateUserResult user = createUserUseCase.execute(
-                new CreateUserCommand(tenant.tenantId(), "someone@example.com", "Str0ng!Passw0rd"));
+                new CreateUserCommand(tenant.tenantId(), "someone@example.com", "Jane", "Doe", "Str0ng!Passw0rd"));
 
         assertThat(user.tenantId()).isEqualTo(tenant.tenantId());
         assertThat(user.email()).isEqualTo("someone@example.com");
@@ -75,10 +75,11 @@ class SsoApplicationIT {
     void rejectsARepeatedEmailWithinTheSameTenant() {
         CreateTenantResult tenant = createTenantUseCase.execute(
                 new CreateTenantCommand("Acme Corp", "acme-dup-email-" + System.nanoTime()));
-        createUserUseCase.execute(new CreateUserCommand(tenant.tenantId(), "dup@example.com", "Str0ng!Passw0rd"));
+        createUserUseCase.execute(
+                new CreateUserCommand(tenant.tenantId(), "dup@example.com", "Jane", "Doe", "Str0ng!Passw0rd"));
 
-        assertThatThrownBy(() -> createUserUseCase.execute(
-                        new CreateUserCommand(tenant.tenantId(), "dup@example.com", "An0ther!Passw0rd")))
+        assertThatThrownBy(() -> createUserUseCase.execute(new CreateUserCommand(
+                        tenant.tenantId(), "dup@example.com", "Jane", "Doe", "An0ther!Passw0rd")))
                 .isInstanceOf(DuplicateEmailException.class);
     }
 }

@@ -53,13 +53,14 @@ class RegisterUserUseCaseTest {
         UUID tenantId = UUID.randomUUID();
         UUID userId = UUID.randomUUID();
         CreateUserResult createResult = new CreateUserResult(userId, tenantId, "someone@example.com");
-        when(createUserUseCase.execute(new CreateUserCommand(tenantId, "someone@example.com", "Str0ng!Passw0rd")))
+        when(createUserUseCase.execute(
+                        new CreateUserCommand(tenantId, "someone@example.com", "Jane", "Doe", "Str0ng!Passw0rd")))
                 .thenReturn(createResult);
         TokenHash tokenHash = TokenHash.of("some-hash-value");
         when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(tokenHash);
 
-        RegisterUserResult result = useCase.execute(
-                new RegisterUserCommand(tenantId, "acme", "someone@example.com", "Str0ng!Passw0rd"));
+        RegisterUserResult result = useCase.execute(new RegisterUserCommand(
+                tenantId, "acme", "someone@example.com", "Jane", "Doe", "Str0ng!Passw0rd"));
 
         assertThat(result.userId()).isEqualTo(userId);
         assertThat(result.tenantId()).isEqualTo(tenantId);
@@ -70,7 +71,9 @@ class RegisterUserUseCaseTest {
         assertThat(tokenCaptor.getValue().userId().value()).isEqualTo(userId);
         assertThat(tokenCaptor.getValue().tokenHash()).isEqualTo(tokenHash);
 
-        verify(emailSender).sendVerificationEmail(eq(Email.of("someone@example.com")), eq("acme"), any(RawVerificationToken.class));
+        verify(emailSender)
+                .sendVerificationEmail(
+                        eq(Email.of("someone@example.com")), eq("acme"), any(RawVerificationToken.class));
     }
 
     @Test
@@ -79,8 +82,8 @@ class RegisterUserUseCaseTest {
         when(createUserUseCase.execute(any(CreateUserCommand.class)))
                 .thenThrow(new DuplicateEmailException("someone@example.com"));
 
-        assertThatThrownBy(() -> useCase.execute(
-                        new RegisterUserCommand(tenantId, "acme", "someone@example.com", "Str0ng!Passw0rd")))
+        assertThatThrownBy(() -> useCase.execute(new RegisterUserCommand(
+                        tenantId, "acme", "someone@example.com", "Jane", "Doe", "Str0ng!Passw0rd")))
                 .isInstanceOf(DuplicateEmailException.class);
 
         verifyNoInteractions(verificationTokenRepository, emailSender);

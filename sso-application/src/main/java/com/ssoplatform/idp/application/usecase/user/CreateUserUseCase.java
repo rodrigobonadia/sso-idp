@@ -10,6 +10,7 @@ import com.ssoplatform.idp.domain.tenant.Tenant;
 import com.ssoplatform.idp.domain.tenant.TenantId;
 import com.ssoplatform.idp.domain.user.Email;
 import com.ssoplatform.idp.domain.user.HashedPassword;
+import com.ssoplatform.idp.domain.user.PersonName;
 import com.ssoplatform.idp.domain.user.RawPassword;
 import com.ssoplatform.idp.domain.user.User;
 import java.util.Objects;
@@ -50,10 +51,12 @@ public class CreateUserUseCase {
             throw new DuplicateEmailException(email.value());
         }
 
+        PersonName givenName = PersonName.of(command.givenName());
+        PersonName familyName = PersonName.of(command.familyName());
         RawPassword rawPassword = RawPassword.of(command.rawPassword());
         HashedPassword hashedPassword = passwordHasher.hash(rawPassword);
 
-        User user = User.register(tenantId, email, hashedPassword);
+        User user = User.register(tenantId, email, givenName, familyName, hashedPassword);
         User saved = userRepository.save(user);
 
         return new CreateUserResult(saved.id().value(), saved.tenantId().value(), saved.email().value());

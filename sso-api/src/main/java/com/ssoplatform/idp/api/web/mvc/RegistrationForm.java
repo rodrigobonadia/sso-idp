@@ -9,6 +9,8 @@ package com.ssoplatform.idp.api.web.mvc;
 public class RegistrationForm {
 
     private String email = "";
+    private String givenName = "";
+    private String familyName = "";
     private String password = "";
 
     public String getEmail() {
@@ -17,6 +19,22 @@ public class RegistrationForm {
 
     public void setEmail(String email) {
         this.email = email;
+    }
+
+    public String getGivenName() {
+        return givenName;
+    }
+
+    public void setGivenName(String givenName) {
+        this.givenName = givenName;
+    }
+
+    public String getFamilyName() {
+        return familyName;
+    }
+
+    public void setFamilyName(String familyName) {
+        this.familyName = familyName;
     }
 
     public String getPassword() {

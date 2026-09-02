@@ -47,7 +47,12 @@ public class RegisterUserUseCase {
         Objects.requireNonNull(command, "command must not be null");
 
         CreateUserResult created = createUserUseCase.execute(
-                new CreateUserCommand(command.tenantId(), command.email(), command.rawPassword()));
+                new CreateUserCommand(
+                        command.tenantId(),
+                        command.email(),
+                        command.givenName(),
+                        command.familyName(),
+                        command.rawPassword()));
 
         RawVerificationToken rawToken = RawVerificationToken.generate();
         TokenHash tokenHash = verificationTokenHasher.hash(rawToken);

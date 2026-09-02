@@ -11,15 +11,19 @@ class UserTest {
 
     private final TenantId tenantId = TenantId.generate();
     private final Email email = Email.of("someone@example.com");
+    private final PersonName givenName = PersonName.of("Jane");
+    private final PersonName familyName = PersonName.of("Doe");
     private final HashedPassword passwordHash = HashedPassword.of("$2a$10$somehashvalue");
 
     @Test
     void registerCreatesAUserPendingEmailVerification() {
-        User user = User.register(tenantId, email, passwordHash);
+        User user = User.register(tenantId, email, givenName, familyName, passwordHash);
 
         assertThat(user.id()).isNotNull();
         assertThat(user.tenantId()).isEqualTo(tenantId);
         assertThat(user.email()).isEqualTo(email);
+        assertThat(user.givenName()).isEqualTo(givenName);
+        assertThat(user.familyName()).isEqualTo(familyName);
         assertThat(user.passwordHash()).isEqualTo(passwordHash);
         assertThat(user.status()).isEqualTo(UserStatus.PENDING_VERIFICATION);
         assertThat(user.failedLoginAttempts()).isZero();
@@ -28,7 +32,7 @@ class UserTest {
 
     @Test
     void verifyEmailActivatesAPendingUser() {
-        User user = User.register(tenantId, email, passwordHash);
+        User user = User.register(tenantId, email, givenName, familyName, passwordHash);
 
         user.verifyEmail();
 
@@ -38,7 +42,7 @@ class UserTest {
 
     @Test
     void verifyEmailOnAnAlreadyActiveUserThrows() {
-        User user = User.register(tenantId, email, passwordHash);
+        User user = User.register(tenantId, email, givenName, familyName, passwordHash);
         user.verifyEmail();
 
         assertThatThrownBy(user::verifyEmail).isInstanceOf(UserStateException.class);
@@ -46,7 +50,7 @@ class UserTest {
 
     @Test
     void changePasswordReplacesTheHash() {
-        User user = User.register(tenantId, email, passwordHash);
+        User user = User.register(tenantId, email, givenName, familyName, passwordHash);
         HashedPassword newHash = HashedPassword.of("$2a$10$anotherhash");
 
         user.changePassword(newHash);
@@ -99,7 +103,7 @@ class UserTest {
 
     @Test
     void recordSuccessfulLoginOnANonActiveUserThrows() {
-        User user = User.register(tenantId, email, passwordHash); // PENDING_VERIFICATION
+        User user = User.register(tenantId, email, givenName, familyName, passwordHash); // PENDING_VERIFICATION
 
         assertThatThrownBy(user::recordSuccessfulLogin).isInstanceOf(UserStateException.class);
     }
@@ -178,16 +182,34 @@ class UserTest {
     @Test
     void reconstituteRebuildsAnExistingUserWithoutRunningRegistrationLogic() {
         User user = User.reconstitute(
-                UserId.generate(), tenantId, email, passwordHash, UserStatus.LOCKED, 3, Instant.now());
+                UserId.generate(),
+                tenantId,
+                email,
+                givenName,
+                familyName,
+                passwordHash,
+                UserStatus.LOCKED,
+                3,
+                Instant.now());
 
         assertThat(user.status()).isEqualTo(UserStatus.LOCKED);
         assertThat(user.failedLoginAttempts()).isEqualTo(3);
+        assertThat(user.givenName()).isEqualTo(givenName);
+        assertThat(user.familyName()).isEqualTo(familyName);
     }
 
     @Test
     void reconstituteRejectsNegativeFailedLoginAttempts() {
         assertThatThrownBy(() -> User.reconstitute(
-                        UserId.generate(), tenantId, email, passwordHash, UserStatus.ACTIVE, -1, Instant.now()))
+                        UserId.generate(),
+                        tenantId,
+                        email,
+                        givenName,
+                        familyName,
+                        passwordHash,
+                        UserStatus.ACTIVE,
+                        -1,
+                        Instant.now()))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -195,16 +217,25 @@ class UserTest {
     void equalityIsBasedOnId() {
         UserId id = UserId.generate();
         Instant now = Instant.now();
-        User first = User.reconstitute(id, tenantId, email, passwordHash, UserStatus.ACTIVE, 0, now);
+        User first = User.reconstitute(
+                id, tenantId, email, givenName, familyName, passwordHash, UserStatus.ACTIVE, 0, now);
         User second = User.reconstitute(
-                id, tenantId, Email.of("other@example.com"), passwordHash, UserStatus.LOCKED, 2, now);
+                id,
+                tenantId,
+                Email.of("other@example.com"),
+                PersonName.of("Other"),
+                PersonName.of("Person"),
+                passwordHash,
+                UserStatus.LOCKED,
+                2,
+                now);
 
         assertThat(first).isEqualTo(second);
         assertThat(first).hasSameHashCodeAs(second);
     }
 
     private User activeUser() {
-        User user = User.register(tenantId, email, passwordHash);
+        User user = User.register(tenantId, email, givenName, familyName, passwordHash);
         user.verifyEmail();
         return user;
     }

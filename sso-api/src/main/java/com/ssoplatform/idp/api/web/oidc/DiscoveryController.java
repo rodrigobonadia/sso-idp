@@ -28,8 +28,8 @@ import org.springframework.web.bind.annotation.RestController;
  * issuer decision (j) in {@code architecture_decisions.md}), so there is nothing here for a
  * framework-free use case to encapsulate.
  *
- * <p>See {@link DiscoveryResponse}'s Javadoc for why unimplemented endpoints (userinfo,
- * revocation, introspection) are omitted entirely rather than advertised ahead of being built.
+ * <p>See {@link DiscoveryResponse}'s Javadoc for why unimplemented endpoints (revocation,
+ * introspection) are omitted entirely rather than advertised ahead of being built.
  */
 @RestController
 public class DiscoveryController {
@@ -59,6 +59,7 @@ public class DiscoveryController {
                 issuer + "/authorize",
                 issuer + "/token",
                 issuer + "/.well-known/jwks.json",
+                issuer + "/userinfo",
                 List.of("openid", "profile", "email"),
                 List.of("code"),
                 List.of("authorization_code"),

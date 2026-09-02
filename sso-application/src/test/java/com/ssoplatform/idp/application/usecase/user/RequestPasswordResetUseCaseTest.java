@@ -15,6 +15,7 @@ import com.ssoplatform.idp.application.port.out.VerificationTokenHasher;
 import com.ssoplatform.idp.domain.passwordreset.PasswordResetToken;
 import com.ssoplatform.idp.domain.tenant.TenantId;
 import com.ssoplatform.idp.domain.user.Email;
+import com.ssoplatform.idp.domain.user.PersonName;
 import com.ssoplatform.idp.domain.user.HashedPassword;
 import com.ssoplatform.idp.domain.user.User;
 import com.ssoplatform.idp.domain.verification.RawVerificationToken;
@@ -55,7 +56,12 @@ class RequestPasswordResetUseCaseTest {
 
     @Test
     void issuesAndSendsATokenWhenTheAccountExistsAndIsActive() {
-        User user = User.register(TENANT_ID, Email.of("someone@example.com"), PASSWORD_HASH);
+        User user = User.register(
+                TENANT_ID,
+                Email.of("someone@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                PASSWORD_HASH);
         user.verifyEmail();
         when(userRepository.findByTenantIdAndEmail(TENANT_ID, Email.of("someone@example.com")))
                 .thenReturn(Optional.of(user));
@@ -74,7 +80,12 @@ class RequestPasswordResetUseCaseTest {
 
     @Test
     void issuesATokenForALockedAccount() {
-        User user = User.register(TENANT_ID, Email.of("someone@example.com"), PASSWORD_HASH);
+        User user = User.register(
+                TENANT_ID,
+                Email.of("someone@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                PASSWORD_HASH);
         user.verifyEmail();
         user.lock();
         when(userRepository.findByTenantIdAndEmail(TENANT_ID, Email.of("someone@example.com")))
@@ -89,7 +100,12 @@ class RequestPasswordResetUseCaseTest {
 
     @Test
     void issuesATokenForAnAccountPendingVerification() {
-        User user = User.register(TENANT_ID, Email.of("someone@example.com"), PASSWORD_HASH);
+        User user = User.register(
+                TENANT_ID,
+                Email.of("someone@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                PASSWORD_HASH);
         when(userRepository.findByTenantIdAndEmail(TENANT_ID, Email.of("someone@example.com")))
                 .thenReturn(Optional.of(user));
         when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(TokenHash.of("some-hash-value"));
@@ -102,7 +118,12 @@ class RequestPasswordResetUseCaseTest {
 
     @Test
     void doesNotIssueATokenForADisabledAccountButDoesNotThrow() {
-        User user = User.register(TENANT_ID, Email.of("someone@example.com"), PASSWORD_HASH);
+        User user = User.register(
+                TENANT_ID,
+                Email.of("someone@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                PASSWORD_HASH);
         user.verifyEmail();
         user.disable();
         when(userRepository.findByTenantIdAndEmail(TENANT_ID, Email.of("someone@example.com")))

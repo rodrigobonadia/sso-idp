@@ -466,7 +466,7 @@ class TokenControllerIT {
                     return request;
                 })
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(new RegisterRequest(email, password))));
+                .content(objectMapper.writeValueAsString(new RegisterRequest(email, "Jane", "Doe", password))));
         String token = extractTokenFromLastMailLog();
         mockMvc.perform(post("/api/verify-email")
                 .with(csrf())

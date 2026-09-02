@@ -10,4 +10,5 @@ import java.util.UUID;
  * already resolved both, and the slug is needed to build the verification link without this use
  * case having to re-fetch the tenant just for its slug.
  */
-public record RegisterUserCommand(UUID tenantId, String tenantSlug, String email, String rawPassword) {}
+public record RegisterUserCommand(
+        UUID tenantId, String tenantSlug, String email, String givenName, String familyName, String rawPassword) {}

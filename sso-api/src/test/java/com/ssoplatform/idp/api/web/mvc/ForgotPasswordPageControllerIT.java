@@ -286,6 +286,8 @@ class ForgotPasswordPageControllerIT {
                     return request;
                 })
                 .param("email", email)
+                .param("givenName", "Jane")
+                .param("familyName", "Doe")
                 .param("password", password));
 
         String token = extractTokenFromLastMailLog();

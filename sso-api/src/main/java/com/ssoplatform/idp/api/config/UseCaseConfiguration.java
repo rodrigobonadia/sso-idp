@@ -5,6 +5,7 @@ import com.ssoplatform.idp.application.port.out.ClientSecretHasher;
 import com.ssoplatform.idp.application.port.out.CodeVerifierValidator;
 import com.ssoplatform.idp.application.port.out.EmailSender;
 import com.ssoplatform.idp.application.port.out.JwtSigner;
+import com.ssoplatform.idp.application.port.out.JwtVerifier;
 import com.ssoplatform.idp.application.port.out.OAuthClientRepository;
 import com.ssoplatform.idp.application.port.out.PasswordHasher;
 import com.ssoplatform.idp.application.port.out.PasswordResetTokenRepository;
@@ -22,6 +23,7 @@ import com.ssoplatform.idp.application.usecase.signingkey.ListSigningKeysUseCase
 import com.ssoplatform.idp.application.usecase.tenant.CreateTenantUseCase;
 import com.ssoplatform.idp.application.usecase.tenant.ResolveActiveTenantBySlugUseCase;
 import com.ssoplatform.idp.application.usecase.token.TokenUseCase;
+import com.ssoplatform.idp.application.usecase.userinfo.GetUserInfoUseCase;
 import com.ssoplatform.idp.application.usecase.user.ChangePasswordUseCase;
 import com.ssoplatform.idp.application.usecase.user.CreateUserUseCase;
 import com.ssoplatform.idp.application.usecase.user.LoginUseCase;
@@ -153,5 +155,11 @@ public class UseCaseConfiguration {
                 signingKeyRepository,
                 privateKeyEncryptor,
                 jwtSigner);
+    }
+
+    @Bean
+    public GetUserInfoUseCase getUserInfoUseCase(
+            SigningKeyRepository signingKeyRepository, JwtVerifier jwtVerifier, UserRepository userRepository) {
+        return new GetUserInfoUseCase(signingKeyRepository, jwtVerifier, userRepository);
     }
 }

@@ -19,6 +19,8 @@ public final class User {
     private final UserId id;
     private final TenantId tenantId;
     private final Email email;
+    private final PersonName givenName;
+    private final PersonName familyName;
     private HashedPassword passwordHash;
     private UserStatus status;
     private int failedLoginAttempts;
@@ -28,6 +30,8 @@ public final class User {
             UserId id,
             TenantId tenantId,
             Email email,
+            PersonName givenName,
+            PersonName familyName,
             HashedPassword passwordHash,
             UserStatus status,
             int failedLoginAttempts,
@@ -35,6 +39,8 @@ public final class User {
         this.id = id;
         this.tenantId = tenantId;
         this.email = email;
+        this.givenName = givenName;
+        this.familyName = familyName;
         this.passwordHash = passwordHash;
         this.status = status;
         this.failedLoginAttempts = failedLoginAttempts;
@@ -42,12 +48,27 @@ public final class User {
     }
 
     /** Registers a brand-new user, pending e-mail verification. */
-    public static User register(TenantId tenantId, Email email, HashedPassword passwordHash) {
+    public static User register(
+            TenantId tenantId,
+            Email email,
+            PersonName givenName,
+            PersonName familyName,
+            HashedPassword passwordHash) {
         Objects.requireNonNull(tenantId, "tenantId must not be null");
         Objects.requireNonNull(email, "email must not be null");
+        Objects.requireNonNull(givenName, "givenName must not be null");
+        Objects.requireNonNull(familyName, "familyName must not be null");
         Objects.requireNonNull(passwordHash, "passwordHash must not be null");
         return new User(
-                UserId.generate(), tenantId, email, passwordHash, UserStatus.PENDING_VERIFICATION, 0, Instant.now());
+                UserId.generate(),
+                tenantId,
+                email,
+                givenName,
+                familyName,
+                passwordHash,
+                UserStatus.PENDING_VERIFICATION,
+                0,
+                Instant.now());
     }
 
     /** Reconstitutes a user that already exists (used by persistence adapters). */
@@ -55,6 +76,8 @@ public final class User {
             UserId id,
             TenantId tenantId,
             Email email,
+            PersonName givenName,
+            PersonName familyName,
             HashedPassword passwordHash,
             UserStatus status,
             int failedLoginAttempts,
@@ -62,13 +85,16 @@ public final class User {
         Objects.requireNonNull(id, "id must not be null");
         Objects.requireNonNull(tenantId, "tenantId must not be null");
         Objects.requireNonNull(email, "email must not be null");
+        Objects.requireNonNull(givenName, "givenName must not be null");
+        Objects.requireNonNull(familyName, "familyName must not be null");
         Objects.requireNonNull(passwordHash, "passwordHash must not be null");
         Objects.requireNonNull(status, "status must not be null");
         Objects.requireNonNull(createdAt, "createdAt must not be null");
         if (failedLoginAttempts < 0) {
             throw new IllegalArgumentException("failedLoginAttempts must not be negative");
         }
-        return new User(id, tenantId, email, passwordHash, status, failedLoginAttempts, createdAt);
+        return new User(
+                id, tenantId, email, givenName, familyName, passwordHash, status, failedLoginAttempts, createdAt);
     }
 
     public void verifyEmail() {
@@ -146,6 +172,14 @@ public final class User {
 
     public Email email() {
         return email;
+    }
+
+    public PersonName givenName() {
+        return givenName;
+    }
+
+    public PersonName familyName() {
+        return familyName;
     }
 
     public HashedPassword passwordHash() {

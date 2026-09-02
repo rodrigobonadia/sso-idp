@@ -16,6 +16,7 @@ import com.ssoplatform.idp.application.port.out.VerificationTokenHasher;
 import com.ssoplatform.idp.domain.passwordreset.PasswordResetToken;
 import com.ssoplatform.idp.domain.tenant.TenantId;
 import com.ssoplatform.idp.domain.user.Email;
+import com.ssoplatform.idp.domain.user.PersonName;
 import com.ssoplatform.idp.domain.user.HashedPassword;
 import com.ssoplatform.idp.domain.user.User;
 import com.ssoplatform.idp.domain.user.UserId;
@@ -65,7 +66,12 @@ class ResetPasswordUseCaseTest {
     @Test
     void resetsThePasswordForAnActiveAccountAndConsumesTheToken() {
         when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(tokenHash);
-        User user = User.register(TENANT_ID, Email.of("someone@example.com"), OLD_PASSWORD_HASH);
+        User user = User.register(
+                TENANT_ID,
+                Email.of("someone@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                OLD_PASSWORD_HASH);
         user.verifyEmail();
         PasswordResetToken token = PasswordResetToken.issue(
                 user.id(), tokenHash, Instant.now().minusSeconds(30), Duration.ofHours(1));
@@ -88,7 +94,12 @@ class ResetPasswordUseCaseTest {
     @Test
     void unlocksALockedAccountAndResetsFailedAttemptsUponSuccessfulReset() {
         when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(tokenHash);
-        User user = User.register(TENANT_ID, Email.of("someone@example.com"), OLD_PASSWORD_HASH);
+        User user = User.register(
+                TENANT_ID,
+                Email.of("someone@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                OLD_PASSWORD_HASH);
         user.verifyEmail();
         user.recordFailedLogin();
         user.recordFailedLogin();
@@ -109,7 +120,12 @@ class ResetPasswordUseCaseTest {
     @Test
     void rejectsResettingAPasswordForADisabledAccount() {
         when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(tokenHash);
-        User user = User.register(TENANT_ID, Email.of("someone@example.com"), OLD_PASSWORD_HASH);
+        User user = User.register(
+                TENANT_ID,
+                Email.of("someone@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                OLD_PASSWORD_HASH);
         user.verifyEmail();
         user.disable();
         PasswordResetToken token = PasswordResetToken.issue(

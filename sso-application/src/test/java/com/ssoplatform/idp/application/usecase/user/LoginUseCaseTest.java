@@ -16,6 +16,7 @@ import com.ssoplatform.idp.application.port.out.PasswordHasher;
 import com.ssoplatform.idp.application.port.out.UserRepository;
 import com.ssoplatform.idp.domain.tenant.TenantId;
 import com.ssoplatform.idp.domain.user.Email;
+import com.ssoplatform.idp.domain.user.PersonName;
 import com.ssoplatform.idp.domain.user.HashedPassword;
 import com.ssoplatform.idp.domain.user.User;
 import java.util.Optional;
@@ -46,7 +47,12 @@ class LoginUseCaseTest {
 
     @Test
     void authenticatesAnActiveUserWithTheCorrectPasswordAndResetsFailedAttempts() {
-        User user = User.register(TENANT_ID, Email.of("someone@example.com"), PASSWORD_HASH);
+        User user = User.register(
+                TENANT_ID,
+                Email.of("someone@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                PASSWORD_HASH);
         user.verifyEmail();
         when(userRepository.findByTenantIdAndEmail(TENANT_ID, Email.of("someone@example.com")))
                 .thenReturn(Optional.of(user));
@@ -85,7 +91,12 @@ class LoginUseCaseTest {
 
     @Test
     void rejectsAWeakShapedPasswordAsAnOrdinaryWrongPasswordRatherThanAStrengthPolicyError() {
-        User user = User.register(TENANT_ID, Email.of("someone@example.com"), PASSWORD_HASH);
+        User user = User.register(
+                TENANT_ID,
+                Email.of("someone@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                PASSWORD_HASH);
         user.verifyEmail();
         when(userRepository.findByTenantIdAndEmail(TENANT_ID, Email.of("someone@example.com")))
                 .thenReturn(Optional.of(user));
@@ -102,7 +113,12 @@ class LoginUseCaseTest {
 
     @Test
     void rejectsAWrongPasswordWithTheGenericInvalidCredentialsExceptionAndRecordsTheFailedAttempt() {
-        User user = User.register(TENANT_ID, Email.of("someone@example.com"), PASSWORD_HASH);
+        User user = User.register(
+                TENANT_ID,
+                Email.of("someone@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                PASSWORD_HASH);
         user.verifyEmail();
         when(userRepository.findByTenantIdAndEmail(TENANT_ID, Email.of("someone@example.com")))
                 .thenReturn(Optional.of(user));
@@ -118,7 +134,12 @@ class LoginUseCaseTest {
 
     @Test
     void rejectsTheCorrectPasswordForAnAccountPendingVerification() {
-        User user = User.register(TENANT_ID, Email.of("someone@example.com"), PASSWORD_HASH);
+        User user = User.register(
+                TENANT_ID,
+                Email.of("someone@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                PASSWORD_HASH);
         when(userRepository.findByTenantIdAndEmail(TENANT_ID, Email.of("someone@example.com")))
                 .thenReturn(Optional.of(user));
         when(passwordHasher.matches(any(String.class), eq(PASSWORD_HASH))).thenReturn(true);
@@ -132,7 +153,12 @@ class LoginUseCaseTest {
 
     @Test
     void rejectsTheCorrectPasswordForALockedAccount() {
-        User user = User.register(TENANT_ID, Email.of("someone@example.com"), PASSWORD_HASH);
+        User user = User.register(
+                TENANT_ID,
+                Email.of("someone@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                PASSWORD_HASH);
         user.lock();
         when(userRepository.findByTenantIdAndEmail(TENANT_ID, Email.of("someone@example.com")))
                 .thenReturn(Optional.of(user));
@@ -147,7 +173,12 @@ class LoginUseCaseTest {
 
     @Test
     void rejectsTheCorrectPasswordForADisabledAccount() {
-        User user = User.register(TENANT_ID, Email.of("someone@example.com"), PASSWORD_HASH);
+        User user = User.register(
+                TENANT_ID,
+                Email.of("someone@example.com"),
+                PersonName.of("Jane"),
+                PersonName.of("Doe"),
+                PASSWORD_HASH);
         user.disable();
         when(userRepository.findByTenantIdAndEmail(TENANT_ID, Email.of("someone@example.com")))
                 .thenReturn(Optional.of(user));

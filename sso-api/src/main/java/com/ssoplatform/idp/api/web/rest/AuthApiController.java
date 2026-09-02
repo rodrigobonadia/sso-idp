@@ -75,8 +75,13 @@ public class AuthApiController {
     @ResponseStatus(HttpStatus.CREATED)
     public RegisterResponse register(@RequestBody RegisterRequest request) {
         TenantSummary tenant = requireTenant();
-        RegisterUserResult result = registerUserUseCase.execute(
-                new RegisterUserCommand(tenant.tenantId(), tenant.slug(), request.email(), request.password()));
+        RegisterUserResult result = registerUserUseCase.execute(new RegisterUserCommand(
+                tenant.tenantId(),
+                tenant.slug(),
+                request.email(),
+                request.givenName(),
+                request.familyName(),
+                request.password()));
         return new RegisterResponse(result.userId(), result.email());
     }
 
