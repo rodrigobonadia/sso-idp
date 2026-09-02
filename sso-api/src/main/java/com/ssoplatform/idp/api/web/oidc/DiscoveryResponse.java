@@ -11,7 +11,11 @@ import java.util.List;
  * rather than advertised as a roadmap placeholder, so a real OIDC client library that trusts this
  * document at face value never attempts to call an endpoint that does not exist yet (see {@code
  * architecture_decisions.md}, Phase 3.5 scope decision). {@code userinfo_endpoint} was added in
- * Phase 3.7, once {@code GET /userinfo} actually existed to be advertised.
+ * Phase 3.7, once {@code GET /userinfo} actually existed to be advertised; {@code
+ * grant_types_supported} grew from just {@code authorization_code} to also list {@code
+ * refresh_token} and {@code client_credentials} once Phase 3.6 and Phase 3.8 respectively made
+ * those grants real (the {@code refresh_token} addition being a small drive-by correction to a
+ * gap Phase 3.6 itself left in this document - see {@code architecture_decisions.md}).
  *
  * <p>snake_case field names are mandated by the spec (like {@code TokenResponse}), hence the
  * explicit {@link JsonProperty} annotations.

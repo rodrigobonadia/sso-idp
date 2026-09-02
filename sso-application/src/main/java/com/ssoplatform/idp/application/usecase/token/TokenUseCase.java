@@ -2,12 +2,14 @@ package com.ssoplatform.idp.application.usecase.token;
 
 import com.ssoplatform.idp.application.exception.OAuthTokenException;
 import com.ssoplatform.idp.application.port.out.AuthorizationCodeRepository;
+import com.ssoplatform.idp.application.port.out.ClientResourceAuthorizationRepository;
 import com.ssoplatform.idp.application.port.out.ClientSecretHasher;
 import com.ssoplatform.idp.application.port.out.CodeVerifierValidator;
 import com.ssoplatform.idp.application.port.out.JwtSigner;
 import com.ssoplatform.idp.application.port.out.OAuthClientRepository;
 import com.ssoplatform.idp.application.port.out.PrivateKeyEncryptor;
 import com.ssoplatform.idp.application.port.out.RefreshTokenRepository;
+import com.ssoplatform.idp.application.port.out.ResourceRepository;
 import com.ssoplatform.idp.application.port.out.SigningKeyRepository;
 import com.ssoplatform.idp.application.port.out.VerificationTokenHasher;
 import com.ssoplatform.idp.domain.authorization.AuthorizationCode;
@@ -20,6 +22,10 @@ import com.ssoplatform.idp.domain.oauth.RedirectUri;
 import com.ssoplatform.idp.domain.refreshtoken.RefreshToken;
 import com.ssoplatform.idp.domain.refreshtoken.RefreshTokenFamilyId;
 import com.ssoplatform.idp.domain.refreshtoken.RefreshTokenReusedException;
+import com.ssoplatform.idp.domain.resource.ClientResourceAuthorization;
+import com.ssoplatform.idp.domain.resource.InvalidResourceIdentifierException;
+import com.ssoplatform.idp.domain.resource.Resource;
+import com.ssoplatform.idp.domain.resource.ResourceIdentifier;
 import com.ssoplatform.idp.domain.signingkey.SigningKey;
 import com.ssoplatform.idp.domain.tenant.TenantId;
 import com.ssoplatform.idp.domain.user.UserId;
@@ -30,31 +36,53 @@ import com.ssoplatform.idp.domain.verification.VerificationTokenAlreadyConsumedE
 import com.ssoplatform.idp.domain.verification.VerificationTokenExpiredException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
- * Handles a {@code POST /token} request for either grant this platform implements:
+ * Handles a {@code POST /token} request for every grant this platform implements:
  *
  * <ul>
  *   <li>{@code authorization_code} (RFC 6749 §4.1.3), the redemption half of the flow {@code
  *       AuthorizeUseCase} begins - see {@link #executeAuthorizationCodeGrant}.
  *   <li>{@code refresh_token} (RFC 6749 §6), which rotates a previously-issued {@link
  *       RefreshToken} forward one step in its family - see {@link #executeRefreshTokenGrant}.
+ *   <li>{@code client_credentials} (RFC 6749 §4.4), a machine-to-machine grant with no resource
+ *       owner/user behind it at all - see {@link #executeClientCredentialsGrant}.
  * </ul>
  *
- * On success, either grant issues a freshly signed access token (JWT, RFC 9068 claim shape) and,
- * when the relevant scopes include {@code openid}, an ID token (OpenID Connect Core 1.0 §2) - both
- * signed with the tenant's current {@code SigningKey} via {@link JwtSigner}, exactly like {@code
- * JwksController} publishes that same key's public half. The {@code authorization_code} grant
- * additionally issues a brand-new refresh token - starting a fresh rotation family (see {@link
- * RefreshToken#issueFirst}) - whenever the redeemed code carried the {@code offline_access} scope
- * AND the client is authorized for the {@code refresh_token} grant; the {@code refresh_token} grant
- * always issues one (continuing the family - see {@link RefreshToken#continueFamily}), since a
- * successful rotation is exactly what replaces the token just consumed.
+ * On success, the {@code authorization_code} and {@code refresh_token} grants issue a freshly
+ * signed access token (JWT, RFC 9068 claim shape) and, when the relevant scopes include {@code
+ * openid}, an ID token (OpenID Connect Core 1.0 §2) - both signed with the tenant's current {@code
+ * SigningKey} via {@link JwtSigner}, exactly like {@code JwksController} publishes that same key's
+ * public half. The {@code authorization_code} grant additionally issues a brand-new refresh token
+ * - starting a fresh rotation family (see {@link RefreshToken#issueFirst}) - whenever the redeemed
+ * code carried the {@code offline_access} scope AND the client is authorized for the {@code
+ * refresh_token} grant; the {@code refresh_token} grant always issues one (continuing the family -
+ * see {@link RefreshToken#continueFamily}), since a successful rotation is exactly what replaces
+ * the token just consumed.
+ *
+ * <p>The {@code client_credentials} grant never issues an ID token (there is no end-user to
+ * authenticate - OpenID Connect Core does not define ID Tokens for this grant) and never issues a
+ * refresh token (the client always holds its own credentials, so it can simply request a brand
+ * new access token the same way instead of rotating one). Its access token's {@code sub} claim is
+ * the client's own {@code client_id} - there is no {@link UserId} to use - and its {@code aud}
+ * claim is the target {@link Resource}'s {@link
+ * com.ssoplatform.idp.domain.resource.ResourceIdentifier}, resolved from the required {@code
+ * resource} request parameter (RFC 8707 "Resource Indicators for OAuth 2.0") rather than always
+ * being the client itself the way the other two grants' access tokens are. See {@link
+ * #executeClientCredentialsGrant} for the full authorization chain: the client must both support
+ * the {@code CLIENT_CREDENTIALS} grant type AND hold a {@link ClientResourceAuthorization} for the
+ * requested resource, and the requested (or, if omitted, every granted) scope must be a subset of
+ * that authorization's {@link ClientResourceAuthorization#grantedScopes()} - which is itself
+ * defensively re-checked against the resource's OWN current scope catalog ({@link
+ * Resource#supportsScope}) in case the two have drifted apart since the authorization was granted.
  *
  * <p>Validation runs in a fixed order, and - unlike {@code AuthorizeUseCase} - EVERY failure from
  * every step throws {@link OAuthTokenException}: RFC 6749 §5.2 never redirects a token error back
@@ -87,6 +115,13 @@ import java.util.UUID;
  * from scratch, and only then reports {@code invalid_grant} - never anything more specific, for
  * the same enumeration-safety reason RFC 6749 §5.2 errors never distinguish sub-cases elsewhere in
  * this class.
+ *
+ * <p>For the {@code client_credentials} grant, every one of "the {@code resource} does not parse
+ * as a URI", "no resource is registered for it in this tenant", "the resource is administratively
+ * disabled", and "the client holds no {@link ClientResourceAuthorization} for it" is collapsed into
+ * the single RFC 8707 error value {@code invalid_target} - the same enumeration-safety reasoning
+ * as {@code invalid_grant} above, so a caller probing for valid resource identifiers learns
+ * nothing from the response.
  */
 public class TokenUseCase {
 
@@ -99,6 +134,7 @@ public class TokenUseCase {
 
     private static final String GRANT_TYPE_AUTHORIZATION_CODE = "authorization_code";
     private static final String GRANT_TYPE_REFRESH_TOKEN = "refresh_token";
+    private static final String GRANT_TYPE_CLIENT_CREDENTIALS = "client_credentials";
     private static final String OPENID_SCOPE = "openid";
     private static final String OFFLINE_ACCESS_SCOPE = "offline_access";
 
@@ -106,6 +142,8 @@ public class TokenUseCase {
     private final ClientSecretHasher clientSecretHasher;
     private final AuthorizationCodeRepository authorizationCodeRepository;
     private final RefreshTokenRepository refreshTokenRepository;
+    private final ResourceRepository resourceRepository;
+    private final ClientResourceAuthorizationRepository clientResourceAuthorizationRepository;
     private final VerificationTokenHasher verificationTokenHasher;
     private final CodeVerifierValidator codeVerifierValidator;
     private final SigningKeyRepository signingKeyRepository;
@@ -117,6 +155,8 @@ public class TokenUseCase {
             ClientSecretHasher clientSecretHasher,
             AuthorizationCodeRepository authorizationCodeRepository,
             RefreshTokenRepository refreshTokenRepository,
+            ResourceRepository resourceRepository,
+            ClientResourceAuthorizationRepository clientResourceAuthorizationRepository,
             VerificationTokenHasher verificationTokenHasher,
             CodeVerifierValidator codeVerifierValidator,
             SigningKeyRepository signingKeyRepository,
@@ -129,6 +169,9 @@ public class TokenUseCase {
                 Objects.requireNonNull(authorizationCodeRepository, "authorizationCodeRepository must not be null");
         this.refreshTokenRepository =
                 Objects.requireNonNull(refreshTokenRepository, "refreshTokenRepository must not be null");
+        this.resourceRepository = Objects.requireNonNull(resourceRepository, "resourceRepository must not be null");
+        this.clientResourceAuthorizationRepository = Objects.requireNonNull(
+                clientResourceAuthorizationRepository, "clientResourceAuthorizationRepository must not be null");
         this.verificationTokenHasher =
                 Objects.requireNonNull(verificationTokenHasher, "verificationTokenHasher must not be null");
         this.codeVerifierValidator =
@@ -149,9 +192,13 @@ public class TokenUseCase {
         if (GRANT_TYPE_REFRESH_TOKEN.equals(command.grantType())) {
             return executeRefreshTokenGrant(command, tenantId);
         }
+        if (GRANT_TYPE_CLIENT_CREDENTIALS.equals(command.grantType())) {
+            return executeClientCredentialsGrant(command, tenantId);
+        }
         throw new OAuthTokenException(
                 "unsupported_grant_type",
-                "Only grant_type=authorization_code or grant_type=refresh_token is supported");
+                "Only grant_type=authorization_code, grant_type=refresh_token or "
+                        + "grant_type=client_credentials is supported");
     }
 
     private TokenResult executeAuthorizationCodeGrant(TokenCommand command, TenantId tenantId) {
@@ -182,8 +229,9 @@ public class TokenUseCase {
 
         String accessToken = buildAccessToken(
                 command.issuer(),
-                client,
-                authorizationCode.userId(),
+                authorizationCode.userId().value().toString(),
+                client.clientId().value(),
+                client.clientId().value(),
                 authorizationCode.scopes(),
                 signingKey,
                 privateKeyDer,
@@ -264,7 +312,14 @@ public class TokenUseCase {
         byte[] privateKeyDer = privateKeyEncryptor.decrypt(signingKey.encryptedPrivateKey());
 
         String accessToken = buildAccessToken(
-                command.issuer(), client, refreshToken.userId(), refreshToken.scopes(), signingKey, privateKeyDer, now);
+                command.issuer(),
+                refreshToken.userId().value().toString(),
+                client.clientId().value(),
+                client.clientId().value(),
+                refreshToken.scopes(),
+                signingKey,
+                privateKeyDer,
+                now);
 
         String idToken = null;
         if (refreshToken.scopes().contains(OPENID_SCOPE)) {
@@ -275,6 +330,74 @@ public class TokenUseCase {
         }
 
         return new TokenResult(accessToken, ACCESS_TOKEN_VALIDITY.toSeconds(), idToken, rawNextRefreshToken.value());
+    }
+
+    private TokenResult executeClientCredentialsGrant(TokenCommand command, TenantId tenantId) {
+        OAuthClient client = authenticateClient(command, tenantId, GrantType.CLIENT_CREDENTIALS);
+
+        if (isBlank(command.resource())) {
+            throw new OAuthTokenException("invalid_request", "resource must not be blank");
+        }
+
+        ResourceIdentifier resourceIdentifier;
+        try {
+            resourceIdentifier = ResourceIdentifier.of(command.resource());
+        } catch (InvalidResourceIdentifierException ex) {
+            throw new OAuthTokenException("invalid_target", "The resource parameter is invalid");
+        }
+
+        Resource resource = resourceRepository
+                .findByTenantIdAndIdentifier(tenantId, resourceIdentifier)
+                .filter(Resource::isUsable)
+                .orElseThrow(() -> new OAuthTokenException(
+                        "invalid_target", "The requested resource is unknown or is not currently usable"));
+
+        ClientResourceAuthorization authorization = clientResourceAuthorizationRepository
+                .findByOAuthClientIdAndResourceId(client.id(), resource.id())
+                .orElseThrow(() -> new OAuthTokenException(
+                        "invalid_target", "The client is not authorized to request tokens for this resource"));
+
+        // Defense in depth: only scopes the resource STILL defines count as grantable, in case the
+        // resource's own catalog and this authorization's granted-scopes snapshot have drifted
+        // apart since the authorization was created - see the class Javadoc.
+        Set<String> grantableScopes = authorization.grantedScopes().stream()
+                .filter(resource::supportsScope)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        Set<String> issuedScopes;
+        Set<String> requestedScopes = parseScopes(command.scope());
+        if (requestedScopes.isEmpty()) {
+            issuedScopes = grantableScopes;
+        } else {
+            for (String scope : requestedScopes) {
+                if (!grantableScopes.contains(scope)) {
+                    throw new OAuthTokenException(
+                            "invalid_scope",
+                            "Scope '" + scope + "' is not granted to this client for this resource");
+                }
+            }
+            issuedScopes = requestedScopes;
+        }
+        if (issuedScopes.isEmpty()) {
+            throw new OAuthTokenException(
+                    "invalid_scope", "This client has no scopes granted for this resource");
+        }
+
+        Instant now = Instant.now();
+        SigningKey signingKey = currentSigningKey(tenantId);
+        byte[] privateKeyDer = privateKeyEncryptor.decrypt(signingKey.encryptedPrivateKey());
+
+        String accessToken = buildAccessToken(
+                command.issuer(),
+                client.clientId().value(),
+                resource.identifier().value(),
+                client.clientId().value(),
+                issuedScopes,
+                signingKey,
+                privateKeyDer,
+                now);
+
+        return new TokenResult(accessToken, ACCESS_TOKEN_VALIDITY.toSeconds(), null, null);
     }
 
     /** Revokes every token sharing {@code familyId} - the reuse-detection response (see the class
@@ -378,17 +501,18 @@ public class TokenUseCase {
 
     private String buildAccessToken(
             String issuer,
-            OAuthClient client,
-            UserId userId,
+            String subject,
+            String audience,
+            String clientId,
             Set<String> scopes,
             SigningKey signingKey,
             byte[] privateKeyDer,
             Instant now) {
         Map<String, Object> claims = new LinkedHashMap<>();
         claims.put("iss", issuer);
-        claims.put("sub", userId.value().toString());
-        claims.put("aud", client.clientId().value());
-        claims.put("client_id", client.clientId().value());
+        claims.put("sub", subject);
+        claims.put("aud", audience);
+        claims.put("client_id", clientId);
         claims.put("iat", now.getEpochSecond());
         claims.put("exp", now.plus(ACCESS_TOKEN_VALIDITY).getEpochSecond());
         claims.put("jti", UUID.randomUUID().toString());
@@ -418,5 +542,13 @@ public class TokenUseCase {
 
     private static boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private static Set<String> parseScopes(String rawScope) {
+        if (rawScope == null || rawScope.isBlank()) {
+            return Set.of();
+        }
+        return Arrays.stream(rawScope.trim().split("\\s+"))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 }

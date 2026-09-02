@@ -62,7 +62,7 @@ public class DiscoveryController {
                 issuer + "/userinfo",
                 List.of("openid", "profile", "email"),
                 List.of("code"),
-                List.of("authorization_code"),
+                List.of("authorization_code", "refresh_token", "client_credentials"),
                 List.of("public"),
                 List.of("RS256"),
                 List.of("client_secret_basic"),

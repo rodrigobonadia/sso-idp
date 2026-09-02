@@ -3,12 +3,13 @@ package com.ssoplatform.idp.application.usecase.token;
 import java.util.UUID;
 
 /**
- * Input to {@link TokenUseCase}: the raw {@code POST /token} form parameters for either grant it
- * supports - {@code authorization_code} (RFC 6749 §4.1.3, plus PKCE per RFC 7636 §4.5) or {@code
- * refresh_token} (RFC 6749 §6) - together with the client credentials presented via HTTP Basic
- * authentication (RFC 6749 §2.3.1 - the only client authentication method this platform accepts,
- * see {@code architecture_decisions.md}) and the tenant/issuer resolved by the web layer before
- * this use case ever runs.
+ * Input to {@link TokenUseCase}: the raw {@code POST /token} form parameters for any grant it
+ * supports - {@code authorization_code} (RFC 6749 section 4.1.3, plus PKCE per RFC 7636 section
+ * 4.5), {@code refresh_token} (RFC 6749 section 6), or {@code client_credentials} (RFC 6749
+ * section 4.4, with the {@code resource} parameter per RFC 8707) - together with the client
+ * credentials presented via HTTP Basic authentication (RFC 6749 section 2.3.1 - the only client
+ * authentication method this platform accepts, see {@code architecture_decisions.md}) and the
+ * tenant/issuer resolved by the web layer before this use case ever runs.
  *
  * <p>Every {@code String} field is intentionally UNVALIDATED raw input, exactly like {@link
  * com.ssoplatform.idp.application.usecase.authorization.AuthorizeCommand} - all shape/business
@@ -16,7 +17,8 @@ import java.util.UUID;
  * through {@link com.ssoplatform.idp.application.exception.OAuthTokenException}. {@link #code},
  * {@link #redirectUri}, and {@link #codeVerifier} are only meaningful for the {@code
  * authorization_code} grant; {@link #refreshToken} is only meaningful for the {@code
- * refresh_token} grant - {@link TokenUseCase} reads only the fields relevant to {@link
+ * refresh_token} grant; {@link #resource} and {@link #scope} are only meaningful for the {@code
+ * client_credentials} grant - {@link TokenUseCase} reads only the fields relevant to {@link
  * #grantType}, and never validates the others as a side effect of dispatching on it.
  *
  * <p>{@link #basicAuthClientId} and {@link #basicAuthClientSecret} are {@code null} when the
@@ -40,5 +42,7 @@ public record TokenCommand(
         String redirectUri,
         String codeVerifier,
         String refreshToken,
+        String resource,
+        String scope,
         String basicAuthClientId,
         String basicAuthClientSecret) {}

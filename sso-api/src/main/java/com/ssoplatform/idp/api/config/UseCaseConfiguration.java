@@ -1,6 +1,7 @@
 package com.ssoplatform.idp.api.config;
 
 import com.ssoplatform.idp.application.port.out.AuthorizationCodeRepository;
+import com.ssoplatform.idp.application.port.out.ClientResourceAuthorizationRepository;
 import com.ssoplatform.idp.application.port.out.ClientSecretHasher;
 import com.ssoplatform.idp.application.port.out.CodeVerifierValidator;
 import com.ssoplatform.idp.application.port.out.EmailSender;
@@ -11,6 +12,7 @@ import com.ssoplatform.idp.application.port.out.PasswordHasher;
 import com.ssoplatform.idp.application.port.out.PasswordResetTokenRepository;
 import com.ssoplatform.idp.application.port.out.PrivateKeyEncryptor;
 import com.ssoplatform.idp.application.port.out.RefreshTokenRepository;
+import com.ssoplatform.idp.application.port.out.ResourceRepository;
 import com.ssoplatform.idp.application.port.out.SigningKeyPairGenerator;
 import com.ssoplatform.idp.application.port.out.SigningKeyRepository;
 import com.ssoplatform.idp.application.port.out.TenantRepository;
@@ -140,6 +142,8 @@ public class UseCaseConfiguration {
             ClientSecretHasher clientSecretHasher,
             AuthorizationCodeRepository authorizationCodeRepository,
             RefreshTokenRepository refreshTokenRepository,
+            ResourceRepository resourceRepository,
+            ClientResourceAuthorizationRepository clientResourceAuthorizationRepository,
             VerificationTokenHasher verificationTokenHasher,
             CodeVerifierValidator codeVerifierValidator,
             SigningKeyRepository signingKeyRepository,
@@ -150,6 +154,8 @@ public class UseCaseConfiguration {
                 clientSecretHasher,
                 authorizationCodeRepository,
                 refreshTokenRepository,
+                resourceRepository,
+                clientResourceAuthorizationRepository,
                 verificationTokenHasher,
                 codeVerifierValidator,
                 signingKeyRepository,

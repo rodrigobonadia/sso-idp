@@ -10,12 +10,15 @@ package com.ssoplatform.idp.application.exception;
  *
  * <p>{@link #errorCode()} is one of the {@code error} values RFC 6749 §5.2 defines for the token
  * endpoint ({@code invalid_request}, {@code invalid_client}, {@code invalid_grant}, {@code
- * unauthorized_client}, {@code unsupported_grant_type}, {@code invalid_scope}). Exactly one code,
- * {@code invalid_client}, gets HTTP 401 with a {@code WWW-Authenticate: Basic} header (client
- * authentication itself failed); every other code gets HTTP 400 - {@code TokenController} is the
- * one place that distinguishes them, by checking {@link #errorCode()}, mirroring how a single
- * exception class already carries the RFC error code as data for {@code
- * OAuthAuthorizationException} rather than one subclass per error value.
+ * unauthorized_client}, {@code unsupported_grant_type}, {@code invalid_scope}), plus {@code
+ * invalid_target} - RFC 8707 §2's dedicated value for a Client Credentials request naming a
+ * {@code resource} the client cannot use, whether because it does not parse, does not exist, is
+ * disabled, or the client holds no authorization for it. Exactly one code, {@code invalid_client},
+ * gets HTTP 401 with a {@code WWW-Authenticate: Basic} header (client authentication itself
+ * failed); every other code gets HTTP 400 - {@code TokenController} is the one place that
+ * distinguishes them, by checking {@link #errorCode()}, mirroring how a single exception class
+ * already carries the RFC error code as data for {@code OAuthAuthorizationException} rather than
+ * one subclass per error value.
  */
 public class OAuthTokenException extends ApplicationException {
 

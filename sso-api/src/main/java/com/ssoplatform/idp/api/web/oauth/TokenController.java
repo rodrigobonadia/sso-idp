@@ -19,22 +19,25 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * {@code POST /token}: the OAuth2/OIDC token endpoint, handling both the Authorization Code +
- * PKCE grant (RFC 6749 §4.1.3) and the Refresh Token grant (RFC 6749 §6) - see {@code
- * TokenUseCase}'s Javadoc for how the two are dispatched and how a new refresh token ends up on
- * this response. Deliberately {@code permitAll} in {@code SecurityConfig}, exactly like {@code
- * /.well-known/jwks.json} - this endpoint authenticates the CLIENT itself via HTTP Basic (parsed by
- * hand below, not via Spring Security's own {@code httpBasic()} DSL, matching how every other
- * authentication surface in this project hand-authenticates through a use case rather than a
- * Spring Security {@code AuthenticationProvider} - see {@code SecurityConfig}'s Javadoc), so there
- * is no resource-owner session for Spring Security to require here at all.
+ * {@code POST /token}: the OAuth2/OIDC token endpoint, handling the Authorization Code + PKCE
+ * grant (RFC 6749 §4.1.3), the Refresh Token grant (RFC 6749 §6) and the Client Credentials grant
+ * (RFC 6749 §4.4, with the {@code resource} parameter per RFC 8707) - see {@code TokenUseCase}'s
+ * Javadoc for how the three are dispatched, how a new refresh token ends up on this response, and
+ * why {@code resource}/{@code scope} only matter for Client Credentials. Deliberately {@code
+ * permitAll} in {@code SecurityConfig}, exactly like {@code /.well-known/jwks.json} - this endpoint
+ * authenticates the CLIENT itself via HTTP Basic (parsed by hand below, not via Spring Security's
+ * own {@code httpBasic()} DSL, matching how every other authentication surface in this project
+ * hand-authenticates through a use case rather than a Spring Security {@code
+ * AuthenticationProvider} - see {@code SecurityConfig}'s Javadoc), so there is no resource-owner
+ * session for Spring Security to require here at all.
  *
  * <p>Unlike {@code AuthorizeController}, there is no redirect step and no "trusted vs untrusted
  * target" split: RFC 6749 §5.2 returns every error directly to the client as a JSON body, so
  * {@link OAuthTokenException} is the only exception this controller ever needs to catch, and
  * {@link #errorResponse} is the single place that maps its {@code errorCode()} to the right HTTP
  * status - 401 with {@code WWW-Authenticate: Basic} for {@code invalid_client} (client
- * authentication itself failed), 400 for everything else (RFC 6749 §5.2).
+ * authentication itself failed), 400 for everything else (RFC 6749 §5.2, and RFC 8707 §2 for
+ * {@code invalid_target}).
  *
  * <p>Both the success and error responses always carry {@code Cache-Control: no-store} and {@code
  * Pragma: no-cache} (RFC 6749 §5.1/§5.2) - a token response must never be cached by an intermediate
@@ -77,7 +80,9 @@ public class TokenController {
             @RequestParam(value = "code", required = false) String code,
             @RequestParam(value = "redirect_uri", required = false) String redirectUri,
             @RequestParam(value = "code_verifier", required = false) String codeVerifier,
-            @RequestParam(value = "refresh_token", required = false) String refreshToken) {
+            @RequestParam(value = "refresh_token", required = false) String refreshToken,
+            @RequestParam(value = "resource", required = false) String resource,
+            @RequestParam(value = "scope", required = false) String scope) {
         TenantSummary tenant = tenantContext.tenant().orElseThrow(TenantRequiredException::new);
         String[] clientCredentials = parseBasicAuth(authorizationHeader);
 
@@ -89,6 +94,8 @@ public class TokenController {
                 redirectUri,
                 codeVerifier,
                 refreshToken,
+                resource,
+                scope,
                 clientCredentials == null ? null : clientCredentials[0],
                 clientCredentials == null ? null : clientCredentials[1]);
 

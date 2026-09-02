@@ -11,12 +11,14 @@ import static org.mockito.Mockito.when;
 
 import com.ssoplatform.idp.application.exception.OAuthTokenException;
 import com.ssoplatform.idp.application.port.out.AuthorizationCodeRepository;
+import com.ssoplatform.idp.application.port.out.ClientResourceAuthorizationRepository;
 import com.ssoplatform.idp.application.port.out.ClientSecretHasher;
 import com.ssoplatform.idp.application.port.out.CodeVerifierValidator;
 import com.ssoplatform.idp.application.port.out.JwtSigner;
 import com.ssoplatform.idp.application.port.out.OAuthClientRepository;
 import com.ssoplatform.idp.application.port.out.PrivateKeyEncryptor;
 import com.ssoplatform.idp.application.port.out.RefreshTokenRepository;
+import com.ssoplatform.idp.application.port.out.ResourceRepository;
 import com.ssoplatform.idp.application.port.out.SigningKeyRepository;
 import com.ssoplatform.idp.application.port.out.VerificationTokenHasher;
 import com.ssoplatform.idp.domain.authorization.AuthorizationCode;
@@ -27,6 +29,9 @@ import com.ssoplatform.idp.domain.oauth.GrantType;
 import com.ssoplatform.idp.domain.oauth.OAuthClient;
 import com.ssoplatform.idp.domain.oauth.RedirectUri;
 import com.ssoplatform.idp.domain.refreshtoken.RefreshToken;
+import com.ssoplatform.idp.domain.resource.ClientResourceAuthorization;
+import com.ssoplatform.idp.domain.resource.Resource;
+import com.ssoplatform.idp.domain.resource.ResourceIdentifier;
 import com.ssoplatform.idp.domain.signingkey.EncryptedPrivateKeyMaterial;
 import com.ssoplatform.idp.domain.signingkey.KeyId;
 import com.ssoplatform.idp.domain.signingkey.PublicKeyMaterial;
@@ -60,6 +65,7 @@ class TokenUseCaseTest {
     private static final String CODE_VALUE = "aVeryLongRawAuthorizationCodeValue12345";
     private static final String CODE_VERIFIER = "aVeryLongCodeVerifierValue1234567890abcdef";
     private static final String REFRESH_TOKEN_VALUE = "aVeryLongRawRefreshTokenValue1234567890";
+    private static final String RESOURCE_IDENTIFIER_VALUE = "https://api.example.com/orders";
     private static final String ISSUER = "http://acme.localhost:8080";
     private static final String SIGNED_JWT = "header.payload.signature";
 
@@ -74,6 +80,12 @@ class TokenUseCaseTest {
 
     @Mock
     private RefreshTokenRepository refreshTokenRepository;
+
+    @Mock
+    private ResourceRepository resourceRepository;
+
+    @Mock
+    private ClientResourceAuthorizationRepository clientResourceAuthorizationRepository;
 
     @Mock
     private VerificationTokenHasher verificationTokenHasher;
@@ -99,6 +111,8 @@ class TokenUseCaseTest {
                 clientSecretHasher,
                 authorizationCodeRepository,
                 refreshTokenRepository,
+                resourceRepository,
+                clientResourceAuthorizationRepository,
                 verificationTokenHasher,
                 codeVerifierValidator,
                 signingKeyRepository,
@@ -158,14 +172,12 @@ class TokenUseCaseTest {
 
     private static TokenCommand validCommand() {
         return new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null,
-                CLIENT_ID_VALUE, CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
     }
 
     private static TokenCommand validRefreshCommand() {
         return new TokenCommand(
-                TENANT_ID.value(), ISSUER, "refresh_token", null, null, null, REFRESH_TOKEN_VALUE, CLIENT_ID_VALUE,
-                CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "refresh_token", null, null, null, REFRESH_TOKEN_VALUE, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
     }
 
     /** Wires the mocks so a fully valid authorization_code request succeeds, for tests that only vary one thing. */
@@ -321,8 +333,7 @@ class TokenUseCaseTest {
     @Test
     void rejectsAnUnsupportedGrantType() {
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "client_credentials", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null,
-                CLIENT_ID_VALUE, CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "password", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -333,8 +344,7 @@ class TokenUseCaseTest {
     @Test
     void rejectsWhenNoBasicAuthCredentialsArePresent() {
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null,
-                null, null);
+                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null, null, null, null, null);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -345,8 +355,7 @@ class TokenUseCaseTest {
     @Test
     void rejectsAMalformedBasicAuthClientId() {
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null,
-                "!!", CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, CODE_VERIFIER, null, null, null, "!!", CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -428,8 +437,7 @@ class TokenUseCaseTest {
         when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
 
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", "  ", REDIRECT_URI_VALUE, CODE_VERIFIER, null,
-                CLIENT_ID_VALUE, CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "authorization_code", "  ", REDIRECT_URI_VALUE, CODE_VERIFIER, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -443,8 +451,7 @@ class TokenUseCaseTest {
         when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
 
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, "  ", CODE_VERIFIER, null,
-                CLIENT_ID_VALUE, CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, "  ", CODE_VERIFIER, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -458,8 +465,7 @@ class TokenUseCaseTest {
         when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
 
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, "  ", null,
-                CLIENT_ID_VALUE, CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, REDIRECT_URI_VALUE, "  ", null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -473,8 +479,7 @@ class TokenUseCaseTest {
         when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
 
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", "!", REDIRECT_URI_VALUE, CODE_VERIFIER, null,
-                CLIENT_ID_VALUE, CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "authorization_code", "!", REDIRECT_URI_VALUE, CODE_VERIFIER, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -553,8 +558,7 @@ class TokenUseCaseTest {
         when(authorizationCodeRepository.findByCodeHash(TokenHash.of("hashed-code"))).thenReturn(Optional.of(code));
 
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, "not a uri", CODE_VERIFIER, null,
-                CLIENT_ID_VALUE, CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "authorization_code", CODE_VALUE, "not a uri", CODE_VERIFIER, null, null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -682,7 +686,7 @@ class TokenUseCaseTest {
         when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
 
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "refresh_token", null, null, null, "  ", CLIENT_ID_VALUE, CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "refresh_token", null, null, null, "  ", null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -696,7 +700,7 @@ class TokenUseCaseTest {
         when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
 
         TokenCommand command = new TokenCommand(
-                TENANT_ID.value(), ISSUER, "refresh_token", null, null, null, "!", CLIENT_ID_VALUE, CLIENT_SECRET);
+                TENANT_ID.value(), ISSUER, "refresh_token", null, null, null, "!", null, null, CLIENT_ID_VALUE, CLIENT_SECRET);
 
         assertThatThrownBy(() -> useCase.execute(command))
                 .isInstanceOf(OAuthTokenException.class)
@@ -790,5 +794,216 @@ class TokenUseCaseTest {
         assertThat(sibling.status().name()).isEqualTo("REVOKED");
         verify(refreshTokenRepository).save(refreshToken);
         verify(refreshTokenRepository).save(sibling);
+    }
+
+    private static OAuthClient clientCredentialsClient() {
+        return OAuthClient.register(
+                TENANT_ID,
+                ClientId.of(CLIENT_ID_VALUE),
+                ClientSecretHash.of("stored-hash"),
+                "Billing Service",
+                Set.of(RedirectUri.of(REDIRECT_URI_VALUE)),
+                Set.of("openid"),
+                Set.of(GrantType.CLIENT_CREDENTIALS));
+    }
+
+    private static Resource resourceWithScopes(Set<String> scopes) {
+        return Resource.register(TENANT_ID, ResourceIdentifier.of(RESOURCE_IDENTIFIER_VALUE), "Orders API", scopes);
+    }
+
+    private static ClientResourceAuthorization authorizationGranting(OAuthClient client, Resource resource, Set<String> grantedScopes) {
+        return ClientResourceAuthorization.authorize(TENANT_ID, client.id(), resource.id(), grantedScopes);
+    }
+
+    private static TokenCommand clientCredentialsCommand(String resource, String scope) {
+        return new TokenCommand(
+                TENANT_ID.value(), ISSUER, "client_credentials", null, null, null, null, resource, scope,
+                CLIENT_ID_VALUE, CLIENT_SECRET);
+    }
+
+    /** Wires the mocks so a fully valid client_credentials request succeeds, for tests that only vary one thing. */
+    private void stubClientCredentialsHappyPathUpTo(
+            OAuthClient client, Resource resource, ClientResourceAuthorization authorization) {
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+        when(resourceRepository.findByTenantIdAndIdentifier(TENANT_ID, ResourceIdentifier.of(RESOURCE_IDENTIFIER_VALUE)))
+                .thenReturn(Optional.of(resource));
+        when(clientResourceAuthorizationRepository.findByOAuthClientIdAndResourceId(client.id(), resource.id()))
+                .thenReturn(Optional.of(authorization));
+        when(signingKeyRepository.findCurrentByTenantId(TENANT_ID)).thenReturn(Optional.of(currentSigningKey()));
+        when(privateKeyEncryptor.decrypt(any(EncryptedPrivateKeyMaterial.class))).thenReturn(new byte[] {1, 2, 3});
+        when(jwtSigner.sign(any(), any(), anyString())).thenReturn(SIGNED_JWT);
+    }
+
+    @Test
+    void issuesAnAccessTokenWithEveryGrantedScopeWhenScopeParamIsOmitted() {
+        OAuthClient client = clientCredentialsClient();
+        Resource resource = resourceWithScopes(Set.of("orders:read", "orders:write"));
+        ClientResourceAuthorization authorization =
+                authorizationGranting(client, resource, Set.of("orders:read", "orders:write"));
+        stubClientCredentialsHappyPathUpTo(client, resource, authorization);
+
+        TokenResult result = useCase.execute(clientCredentialsCommand(RESOURCE_IDENTIFIER_VALUE, null));
+
+        assertThat(result.accessToken()).isEqualTo(SIGNED_JWT);
+        assertThat(result.expiresInSeconds()).isEqualTo(TokenUseCase.ACCESS_TOKEN_VALIDITY.toSeconds());
+        assertThat(result.idToken()).isNull();
+        assertThat(result.refreshToken()).isNull();
+
+        ArgumentCaptor<Map<String, Object>> claimsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(jwtSigner).sign(claimsCaptor.capture(), any(), anyString());
+        Map<String, Object> claims = claimsCaptor.getValue();
+        assertThat(claims.get("scope")).isIn("orders:read orders:write", "orders:write orders:read");
+    }
+
+    @Test
+    void issuesAnAccessTokenWithOnlyTheExplicitlyRequestedSubsetOfScopes() {
+        OAuthClient client = clientCredentialsClient();
+        Resource resource = resourceWithScopes(Set.of("orders:read", "orders:write"));
+        ClientResourceAuthorization authorization =
+                authorizationGranting(client, resource, Set.of("orders:read", "orders:write"));
+        stubClientCredentialsHappyPathUpTo(client, resource, authorization);
+
+        useCase.execute(clientCredentialsCommand(RESOURCE_IDENTIFIER_VALUE, "orders:read"));
+
+        ArgumentCaptor<Map<String, Object>> claimsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(jwtSigner).sign(claimsCaptor.capture(), any(), anyString());
+        assertThat(claimsCaptor.getValue().get("scope")).isEqualTo("orders:read");
+    }
+
+    @Test
+    void theAccessTokenClaimsCarryTheClientAsSubjectAndTheResourceAsAudience() {
+        OAuthClient client = clientCredentialsClient();
+        Resource resource = resourceWithScopes(Set.of("orders:read"));
+        ClientResourceAuthorization authorization = authorizationGranting(client, resource, Set.of("orders:read"));
+        stubClientCredentialsHappyPathUpTo(client, resource, authorization);
+
+        useCase.execute(clientCredentialsCommand(RESOURCE_IDENTIFIER_VALUE, null));
+
+        ArgumentCaptor<Map<String, Object>> claimsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(jwtSigner).sign(claimsCaptor.capture(), any(), anyString());
+        Map<String, Object> claims = claimsCaptor.getValue();
+        assertThat(claims.get("iss")).isEqualTo(ISSUER);
+        assertThat(claims.get("sub")).isEqualTo(CLIENT_ID_VALUE);
+        assertThat(claims.get("aud")).isEqualTo(RESOURCE_IDENTIFIER_VALUE);
+        assertThat(claims.get("client_id")).isEqualTo(CLIENT_ID_VALUE);
+    }
+
+    @Test
+    void excludesGrantedScopesTheResourceNoLongerSupportsWhenScopeParamIsOmitted() {
+        OAuthClient client = clientCredentialsClient();
+        // The authorization still lists "orders:cancel" as granted, but the resource's own
+        // catalog no longer defines it - the defense-in-depth check described on the class
+        // Javadoc must silently drop it rather than issue a scope the resource does not support.
+        Resource resource = resourceWithScopes(Set.of("orders:read"));
+        ClientResourceAuthorization authorization =
+                authorizationGranting(client, resource, Set.of("orders:read", "orders:cancel"));
+        stubClientCredentialsHappyPathUpTo(client, resource, authorization);
+
+        useCase.execute(clientCredentialsCommand(RESOURCE_IDENTIFIER_VALUE, null));
+
+        ArgumentCaptor<Map<String, Object>> claimsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(jwtSigner).sign(claimsCaptor.capture(), any(), anyString());
+        assertThat(claimsCaptor.getValue().get("scope")).isEqualTo("orders:read");
+    }
+
+    @Test
+    void rejectsABlankResourceParameter() {
+        // Client authentication runs first, exactly like the authorization_code grant's own
+        // rejectsABlankCode - so this must stub a successful client authentication before the
+        // blank-resource check is ever reached.
+        OAuthClient client = clientCredentialsClient();
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+
+        assertThatThrownBy(() -> useCase.execute(clientCredentialsCommand("  ", null)))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("invalid_request"));
+    }
+
+    @Test
+    void rejectsAMalformedResourceParameterAsInvalidTarget() {
+        OAuthClient client = clientCredentialsClient();
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+
+        assertThatThrownBy(() -> useCase.execute(clientCredentialsCommand("not a uri", null)))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("invalid_target"));
+    }
+
+    @Test
+    void rejectsAnUnknownResourceAsInvalidTarget() {
+        OAuthClient client = clientCredentialsClient();
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+        when(resourceRepository.findByTenantIdAndIdentifier(TENANT_ID, ResourceIdentifier.of(RESOURCE_IDENTIFIER_VALUE)))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> useCase.execute(clientCredentialsCommand(RESOURCE_IDENTIFIER_VALUE, null)))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("invalid_target"));
+    }
+
+    @Test
+    void rejectsADisabledResourceAsInvalidTarget() {
+        OAuthClient client = clientCredentialsClient();
+        Resource resource = resourceWithScopes(Set.of("orders:read"));
+        resource.disable();
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+        when(resourceRepository.findByTenantIdAndIdentifier(TENANT_ID, ResourceIdentifier.of(RESOURCE_IDENTIFIER_VALUE)))
+                .thenReturn(Optional.of(resource));
+
+        assertThatThrownBy(() -> useCase.execute(clientCredentialsCommand(RESOURCE_IDENTIFIER_VALUE, null)))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("invalid_target"));
+    }
+
+    @Test
+    void rejectsAClientWithNoAuthorizationForTheResourceAsInvalidTarget() {
+        OAuthClient client = clientCredentialsClient();
+        Resource resource = resourceWithScopes(Set.of("orders:read"));
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+        when(resourceRepository.findByTenantIdAndIdentifier(TENANT_ID, ResourceIdentifier.of(RESOURCE_IDENTIFIER_VALUE)))
+                .thenReturn(Optional.of(resource));
+        when(clientResourceAuthorizationRepository.findByOAuthClientIdAndResourceId(client.id(), resource.id()))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> useCase.execute(clientCredentialsCommand(RESOURCE_IDENTIFIER_VALUE, null)))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("invalid_target"));
+    }
+
+    @Test
+    void rejectsARequestedScopeThatWasNotGrantedToThisClient() {
+        // Deliberately NOT stubClientCredentialsHappyPathUpTo here: scope validation fails before
+        // a signing key is ever looked up, so stubbing that far would be unnecessary stubbing
+        // under Mockito's strict stubs.
+        OAuthClient client = clientCredentialsClient();
+        Resource resource = resourceWithScopes(Set.of("orders:read", "orders:write"));
+        ClientResourceAuthorization authorization = authorizationGranting(client, resource, Set.of("orders:read"));
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+        when(resourceRepository.findByTenantIdAndIdentifier(TENANT_ID, ResourceIdentifier.of(RESOURCE_IDENTIFIER_VALUE)))
+                .thenReturn(Optional.of(resource));
+        when(clientResourceAuthorizationRepository.findByOAuthClientIdAndResourceId(client.id(), resource.id()))
+                .thenReturn(Optional.of(authorization));
+
+        assertThatThrownBy(() -> useCase.execute(clientCredentialsCommand(RESOURCE_IDENTIFIER_VALUE, "orders:write")))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("invalid_scope"));
+    }
+
+    @Test
+    void rejectsAClientNotAuthorizedForTheClientCredentialsGrant() {
+        OAuthClient client = activeClient(); // only supports AUTHORIZATION_CODE
+        when(oauthClientRepository.findByClientId(ClientId.of(CLIENT_ID_VALUE))).thenReturn(Optional.of(client));
+        when(clientSecretHasher.matches(eq(CLIENT_SECRET), any(ClientSecretHash.class))).thenReturn(true);
+
+        assertThatThrownBy(() -> useCase.execute(clientCredentialsCommand(RESOURCE_IDENTIFIER_VALUE, null)))
+                .isInstanceOf(OAuthTokenException.class)
+                .satisfies(ex -> assertThat(((OAuthTokenException) ex).errorCode()).isEqualTo("unauthorized_client"));
     }
 }

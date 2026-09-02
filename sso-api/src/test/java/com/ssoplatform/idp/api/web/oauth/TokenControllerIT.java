@@ -15,8 +15,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ssoplatform.idp.api.web.rest.LoginRequest;
 import com.ssoplatform.idp.api.web.rest.RegisterRequest;
 import com.ssoplatform.idp.api.web.rest.VerifyEmailRequest;
+import com.ssoplatform.idp.application.port.out.ClientResourceAuthorizationRepository;
 import com.ssoplatform.idp.application.port.out.ClientSecretHasher;
 import com.ssoplatform.idp.application.port.out.OAuthClientRepository;
+import com.ssoplatform.idp.application.port.out.ResourceRepository;
 import com.ssoplatform.idp.application.usecase.signingkey.GenerateSigningKeyCommand;
 import com.ssoplatform.idp.application.usecase.signingkey.GenerateSigningKeyUseCase;
 import com.ssoplatform.idp.application.usecase.tenant.CreateTenantCommand;
@@ -26,6 +28,9 @@ import com.ssoplatform.idp.domain.oauth.ClientId;
 import com.ssoplatform.idp.domain.oauth.GrantType;
 import com.ssoplatform.idp.domain.oauth.OAuthClient;
 import com.ssoplatform.idp.domain.oauth.RedirectUri;
+import com.ssoplatform.idp.domain.resource.ClientResourceAuthorization;
+import com.ssoplatform.idp.domain.resource.Resource;
+import com.ssoplatform.idp.domain.resource.ResourceIdentifier;
 import com.ssoplatform.idp.domain.tenant.TenantId;
 import com.ssoplatform.idp.infrastructure.notification.MockEmailSenderAdapter;
 import jakarta.servlet.http.HttpSession;
@@ -94,6 +99,12 @@ class TokenControllerIT {
     private ClientSecretHasher clientSecretHasher;
 
     @Autowired
+    private ResourceRepository resourceRepository;
+
+    @Autowired
+    private ClientResourceAuthorizationRepository clientResourceAuthorizationRepository;
+
+    @Autowired
     private GenerateSigningKeyUseCase generateSigningKeyUseCase;
 
     @Autowired
@@ -144,6 +155,38 @@ class TokenControllerIT {
                 Set.of(GrantType.AUTHORIZATION_CODE, GrantType.REFRESH_TOKEN));
         oauthClientRepository.save(client);
         generateSigningKeyUseCase.execute(new GenerateSigningKeyCommand(tenant.tenantId()));
+        return new TenantAndClient(tenantSlug + ".localhost", clientIdValue);
+    }
+
+    private TenantAndClient provisionClientCredentialsClientAndResource(
+            String tenantSlug,
+            String clientIdValue,
+            String resourceIdentifierValue,
+            Set<String> resourceScopes,
+            Set<String> grantedScopes) {
+        CreateTenantResult tenant = createTenantUseCase.execute(new CreateTenantCommand("Acme Corp", tenantSlug));
+        OAuthClient client = OAuthClient.register(
+                TenantId.of(tenant.tenantId()),
+                ClientId.of(clientIdValue),
+                clientSecretHasher.hash(RAW_CLIENT_SECRET),
+                "Billing Service",
+                Set.of(RedirectUri.of(REDIRECT_URI)),
+                Set.of("openid"),
+                Set.of(GrantType.CLIENT_CREDENTIALS));
+        oauthClientRepository.save(client);
+        generateSigningKeyUseCase.execute(new GenerateSigningKeyCommand(tenant.tenantId()));
+
+        Resource resource = Resource.register(
+                TenantId.of(tenant.tenantId()),
+                ResourceIdentifier.of(resourceIdentifierValue),
+                "Orders API",
+                resourceScopes);
+        resourceRepository.save(resource);
+        if (!grantedScopes.isEmpty()) {
+            ClientResourceAuthorization authorization = ClientResourceAuthorization.authorize(
+                    TenantId.of(tenant.tenantId()), client.id(), resource.id(), grantedScopes);
+            clientResourceAuthorizationRepository.save(authorization);
+        }
         return new TenantAndClient(tenantSlug + ".localhost", clientIdValue);
     }
 
@@ -390,6 +433,114 @@ class TokenControllerIT {
         mockMvc.perform(refreshTokenRequest(ctx, "irrelevant-value-since-client-check-runs-first"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("unauthorized_client"));
+    }
+
+    @Test
+    void issuesAClientCredentialsAccessTokenWithNoIdTokenOrRefreshToken() throws Exception {
+        String resourceIdentifier = "https://api.example.com/orders";
+        TenantAndClient ctx = provisionClientCredentialsClientAndResource(
+                "acme-cc-happy",
+                "acme-cc-happy-client",
+                resourceIdentifier,
+                Set.of("orders:read", "orders:write"),
+                Set.of("orders:read", "orders:write"));
+
+        MvcResult result = mockMvc.perform(clientCredentialsRequest(ctx, resourceIdentifier, null))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+                .andExpect(header().string(HttpHeaders.PRAGMA, "no-cache"))
+                .andReturn();
+
+        Map<String, Object> body = objectMapper.readValue(result.getResponse().getContentAsString(), Map.class);
+        assertThat(body.get("token_type")).isEqualTo("Bearer");
+        assertThat(body).doesNotContainKey("id_token");
+        assertThat(body).doesNotContainKey("refresh_token");
+        String accessToken = (String) body.get("access_token");
+        assertThat(accessToken).isNotBlank();
+
+        RSAPublicKey publicKey = fetchTenantPublicKey(ctx.tenantSubdomain());
+        assertThat(verifiesSignature(accessToken, publicKey)).isTrue();
+
+        Map<String, Object> claims = decodeJwtPayload(accessToken);
+        assertThat(claims.get("sub")).isEqualTo(ctx.clientIdValue());
+        assertThat(claims.get("aud")).isEqualTo(resourceIdentifier);
+        assertThat(claims.get("client_id")).isEqualTo(ctx.clientIdValue());
+    }
+
+    @Test
+    void rejectsAClientCredentialsRequestWithNoResourceParameter() throws Exception {
+        TenantAndClient ctx = provisionClientCredentialsClientAndResource(
+                "acme-cc-noresource",
+                "acme-cc-noresource-client",
+                "https://api.example.com/orders",
+                Set.of("orders:read"),
+                Set.of("orders:read"));
+
+        mockMvc.perform(clientCredentialsRequest(ctx, null, null))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_request"));
+    }
+
+    @Test
+    void rejectsAClientCredentialsRequestForAnUnknownResource() throws Exception {
+        TenantAndClient ctx = provisionClientCredentialsClientAndResource(
+                "acme-cc-unknown",
+                "acme-cc-unknown-client",
+                "https://api.example.com/orders",
+                Set.of("orders:read"),
+                Set.of("orders:read"));
+
+        mockMvc.perform(clientCredentialsRequest(ctx, "https://api.example.com/no-such-resource", null))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_target"));
+    }
+
+    @Test
+    void rejectsAClientCredentialsRequestWhenTheClientHasNoAuthorizationForTheResource() throws Exception {
+        String resourceIdentifier = "https://api.example.com/orders";
+        TenantAndClient ctx = provisionClientCredentialsClientAndResource(
+                "acme-cc-noauth",
+                "acme-cc-noauth-client",
+                resourceIdentifier,
+                Set.of("orders:read"),
+                Set.of()); // no ClientResourceAuthorization created at all
+
+        mockMvc.perform(clientCredentialsRequest(ctx, resourceIdentifier, null))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_target"));
+    }
+
+    @Test
+    void rejectsAClientCredentialsRequestForAScopeNotGrantedToThisClient() throws Exception {
+        String resourceIdentifier = "https://api.example.com/orders";
+        TenantAndClient ctx = provisionClientCredentialsClientAndResource(
+                "acme-cc-scope",
+                "acme-cc-scope-client",
+                resourceIdentifier,
+                Set.of("orders:read", "orders:write"),
+                Set.of("orders:read"));
+
+        mockMvc.perform(clientCredentialsRequest(ctx, resourceIdentifier, "orders:write"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_scope"));
+    }
+
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder clientCredentialsRequest(
+            TenantAndClient ctx, String resource, String scope) {
+        var builder = post("/token")
+                .with(request -> {
+                    request.setServerName(ctx.tenantSubdomain());
+                    return request;
+                })
+                .header(HttpHeaders.AUTHORIZATION, basicAuthHeader(ctx.clientIdValue(), RAW_CLIENT_SECRET))
+                .param("grant_type", "client_credentials");
+        if (resource != null) {
+            builder = builder.param("resource", resource);
+        }
+        if (scope != null) {
+            builder = builder.param("scope", scope);
+        }
+        return builder;
     }
 
     private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder tokenRequest(
