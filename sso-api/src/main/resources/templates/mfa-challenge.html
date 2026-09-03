@@ -11,7 +11,7 @@
 
 <form th:action="@{/login/mfa}" th:object="${challengeForm}" method="post">
     <div>
-        <label for="code">Code from your authenticator app</label>
+        <label for="code" th:text="${mfaMethod == 'EMAIL_OTP'} ? 'Code from your e-mail' : 'Code from your authenticator app'"></label>
         <input type="text" id="code" th:field="*{code}" inputmode="numeric" autocomplete="one-time-code" />
     </div>
     <p>Lost access to your authenticator? Enter one of your recovery codes instead:</p>

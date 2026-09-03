@@ -20,6 +20,7 @@ import com.ssoplatform.idp.application.port.out.VerificationTokenHasher;
 import com.ssoplatform.idp.application.usecase.user.LoginResult;
 import com.ssoplatform.idp.domain.mfa.EncryptedTotpSecret;
 import com.ssoplatform.idp.domain.mfa.MfaChallenge;
+import com.ssoplatform.idp.domain.mfa.MfaMethod;
 import com.ssoplatform.idp.domain.mfa.TotpCredential;
 import com.ssoplatform.idp.domain.tenant.TenantId;
 import com.ssoplatform.idp.domain.user.Email;
@@ -92,7 +93,7 @@ class VerifyMfaTotpChallengeUseCaseTest {
     void completesLoginForACorrectCodeAndConsumesTheChallenge() {
         when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(tokenHash);
         MfaChallenge challenge =
-                MfaChallenge.issue(user.id(), TENANT_ID, tokenHash, Instant.now(), Duration.ofMinutes(5));
+                MfaChallenge.issue(user.id(), TENANT_ID, MfaMethod.TOTP, tokenHash, Instant.now(), Duration.ofMinutes(5));
         when(mfaChallengeRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(challenge));
         TotpCredential active = TotpCredential.enroll(user.id(), encryptedSecret, Instant.now());
         active.activate(Instant.now());
@@ -115,7 +116,7 @@ class VerifyMfaTotpChallengeUseCaseTest {
     void rejectsAWrongCodeAndDoesNotConsumeTheChallengeSoItCanBeRetried() {
         when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(tokenHash);
         MfaChallenge challenge =
-                MfaChallenge.issue(user.id(), TENANT_ID, tokenHash, Instant.now(), Duration.ofMinutes(5));
+                MfaChallenge.issue(user.id(), TENANT_ID, MfaMethod.TOTP, tokenHash, Instant.now(), Duration.ofMinutes(5));
         when(mfaChallengeRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(challenge));
         TotpCredential active = TotpCredential.enroll(user.id(), encryptedSecret, Instant.now());
         active.activate(Instant.now());
@@ -145,7 +146,7 @@ class VerifyMfaTotpChallengeUseCaseTest {
     void rejectsAnAlreadyConsumedChallenge() {
         when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(tokenHash);
         MfaChallenge challenge =
-                MfaChallenge.issue(user.id(), TENANT_ID, tokenHash, Instant.now(), Duration.ofMinutes(5));
+                MfaChallenge.issue(user.id(), TENANT_ID, MfaMethod.TOTP, tokenHash, Instant.now(), Duration.ofMinutes(5));
         challenge.consume(Instant.now());
         when(mfaChallengeRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(challenge));
 
@@ -158,7 +159,7 @@ class VerifyMfaTotpChallengeUseCaseTest {
     void rejectsAnExpiredChallenge() {
         when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(tokenHash);
         MfaChallenge challenge = MfaChallenge.issue(
-                user.id(), TENANT_ID, tokenHash, Instant.now().minusSeconds(600), Duration.ofMinutes(5));
+                user.id(), TENANT_ID, MfaMethod.TOTP, tokenHash, Instant.now().minusSeconds(600), Duration.ofMinutes(5));
         when(mfaChallengeRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(challenge));
 
         assertThatThrownBy(() -> useCase.execute(
@@ -170,7 +171,7 @@ class VerifyMfaTotpChallengeUseCaseTest {
     void surfacesMfaNotEnabledWhenTheCredentialIsNoLongerActive() {
         when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(tokenHash);
         MfaChallenge challenge =
-                MfaChallenge.issue(user.id(), TENANT_ID, tokenHash, Instant.now(), Duration.ofMinutes(5));
+                MfaChallenge.issue(user.id(), TENANT_ID, MfaMethod.TOTP, tokenHash, Instant.now(), Duration.ofMinutes(5));
         when(mfaChallengeRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(challenge));
         when(totpCredentialRepository.findByUserId(user.id())).thenReturn(Optional.empty());
 

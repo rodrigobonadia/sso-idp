@@ -10,10 +10,12 @@ import static org.mockito.Mockito.when;
 import com.ssoplatform.idp.application.exception.IncorrectCurrentPasswordException;
 import com.ssoplatform.idp.application.exception.MfaNotEnabledException;
 import com.ssoplatform.idp.application.exception.UserNotFoundException;
+import com.ssoplatform.idp.application.port.out.EmailOtpCredentialRepository;
 import com.ssoplatform.idp.application.port.out.PasswordHasher;
 import com.ssoplatform.idp.application.port.out.RecoveryCodeRepository;
 import com.ssoplatform.idp.application.port.out.TotpCredentialRepository;
 import com.ssoplatform.idp.application.port.out.UserRepository;
+import com.ssoplatform.idp.domain.mfa.EmailOtpCredential;
 import com.ssoplatform.idp.domain.mfa.EncryptedTotpSecret;
 import com.ssoplatform.idp.domain.mfa.TotpCredential;
 import com.ssoplatform.idp.domain.tenant.TenantId;
@@ -45,6 +47,9 @@ class DisableMfaUseCaseTest {
     private TotpCredentialRepository totpCredentialRepository;
 
     @Mock
+    private EmailOtpCredentialRepository emailOtpCredentialRepository;
+
+    @Mock
     private RecoveryCodeRepository recoveryCodeRepository;
 
     private DisableMfaUseCase useCase;
@@ -52,13 +57,14 @@ class DisableMfaUseCaseTest {
 
     @BeforeEach
     void setUp() {
-        useCase = new DisableMfaUseCase(userRepository, passwordHasher, totpCredentialRepository, recoveryCodeRepository);
+        useCase = new DisableMfaUseCase(
+                userRepository, passwordHasher, totpCredentialRepository, emailOtpCredentialRepository, recoveryCodeRepository);
         user = User.register(
                 TENANT_ID, Email.of("someone@example.com"), PersonName.of("Jane"), PersonName.of("Doe"), PASSWORD_HASH);
     }
 
     @Test
-    void disablesMfaForACorrectPasswordAndAnExistingCredential() {
+    void disablesMfaForACorrectPasswordAndAnExistingTotpCredential() {
         when(userRepository.findById(user.id())).thenReturn(Optional.of(user));
         when(passwordHasher.matches(eq("Str0ng!Passw0rd"), eq(PASSWORD_HASH))).thenReturn(true);
         when(totpCredentialRepository.findByUserId(user.id())).thenReturn(Optional.of(
@@ -67,6 +73,25 @@ class DisableMfaUseCaseTest {
         useCase.execute(new DisableMfaCommand(user.id().value(), "Str0ng!Passw0rd"));
 
         verify(totpCredentialRepository).deleteByUserId(user.id());
+        verify(emailOtpCredentialRepository).deleteByUserId(user.id());
+        verify(recoveryCodeRepository).deleteAllByUserId(user.id());
+    }
+
+    /** Symmetry check (Phase 4.2): the exact same use case, unmodified, must also disable a
+     * user's e-mail OTP credential when that is the active method instead of TOTP - see {@code
+     * DisableMfaUseCase}'s Javadoc for why one generalized action covers both methods. */
+    @Test
+    void disablesMfaForACorrectPasswordAndAnExistingEmailOtpCredential() {
+        when(userRepository.findById(user.id())).thenReturn(Optional.of(user));
+        when(passwordHasher.matches(eq("Str0ng!Passw0rd"), eq(PASSWORD_HASH))).thenReturn(true);
+        when(totpCredentialRepository.findByUserId(user.id())).thenReturn(Optional.empty());
+        when(emailOtpCredentialRepository.findByUserId(user.id()))
+                .thenReturn(Optional.of(EmailOtpCredential.enable(user.id(), Instant.now())));
+
+        useCase.execute(new DisableMfaCommand(user.id().value(), "Str0ng!Passw0rd"));
+
+        verify(totpCredentialRepository).deleteByUserId(user.id());
+        verify(emailOtpCredentialRepository).deleteByUserId(user.id());
         verify(recoveryCodeRepository).deleteAllByUserId(user.id());
     }
 
@@ -79,6 +104,7 @@ class DisableMfaUseCaseTest {
                 .isInstanceOf(IncorrectCurrentPasswordException.class);
 
         verify(totpCredentialRepository, never()).deleteByUserId(any());
+        verify(emailOtpCredentialRepository, never()).deleteByUserId(any());
         verify(recoveryCodeRepository, never()).deleteAllByUserId(any());
     }
 
@@ -92,6 +118,7 @@ class DisableMfaUseCaseTest {
                 .isInstanceOf(MfaNotEnabledException.class);
 
         verify(totpCredentialRepository, never()).deleteByUserId(any());
+        verify(emailOtpCredentialRepository, never()).deleteByUserId(any());
     }
 
     @Test

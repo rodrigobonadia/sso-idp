@@ -14,8 +14,10 @@ import com.ssoplatform.idp.application.exception.MfaNotEnabledException;
 import com.ssoplatform.idp.application.exception.TenantNotActiveException;
 import com.ssoplatform.idp.application.exception.TenantNotFoundException;
 import com.ssoplatform.idp.application.exception.VerificationTokenNotFoundException;
+import com.ssoplatform.idp.domain.mfa.InvalidEmailOtpCodeException;
 import com.ssoplatform.idp.domain.mfa.InvalidRecoveryCodeException;
 import com.ssoplatform.idp.domain.mfa.InvalidTotpCodeException;
+import com.ssoplatform.idp.domain.mfa.TooManyFailedEmailOtpAttemptsException;
 import com.ssoplatform.idp.domain.user.InvalidEmailException;
 import com.ssoplatform.idp.domain.user.UserStateException;
 import com.ssoplatform.idp.domain.user.WeakPasswordException;
@@ -60,7 +62,8 @@ public class ApiExceptionHandler {
         TenantRequiredException.class,
         IncorrectCurrentPasswordException.class,
         InvalidTotpCodeException.class,
-        InvalidRecoveryCodeException.class
+        InvalidRecoveryCodeException.class,
+        InvalidEmailOtpCodeException.class
     })
     public ResponseEntity<ErrorResponse> handleBadRequest(RuntimeException ex) {
         return respond(HttpStatus.BAD_REQUEST, ex);
@@ -84,6 +87,18 @@ public class ApiExceptionHandler {
     @ExceptionHandler(InvalidMfaCodeException.class)
     public ResponseEntity<ErrorResponse> handleUnauthorized(InvalidMfaCodeException ex) {
         return respond(HttpStatus.UNAUTHORIZED, ex);
+    }
+
+    /**
+     * A live but permanently-exhausted e-mail OTP code (Phase 4.2) - see {@code EmailOtpCode}'s
+     * Javadoc for why this limit exists at all. {@code 429 Too Many Requests} (RFC 6585) is the
+     * semantically correct status for "you have made too many attempts, try again by requesting a
+     * new code" - distinct from {@code 401} (a single wrong code that can still be retried) and
+     * from {@code 410 Gone} (a code that expired from elapsed time rather than attempt count).
+     */
+    @ExceptionHandler(TooManyFailedEmailOtpAttemptsException.class)
+    public ResponseEntity<ErrorResponse> handleTooManyRequests(TooManyFailedEmailOtpAttemptsException ex) {
+        return respond(HttpStatus.TOO_MANY_REQUESTS, ex);
     }
 
     @ExceptionHandler(TenantNotActiveException.class)

@@ -2,9 +2,11 @@ package com.ssoplatform.idp.application.usecase.mfa;
 
 import com.ssoplatform.idp.application.exception.MfaAlreadyEnabledException;
 import com.ssoplatform.idp.application.exception.UserNotFoundException;
+import com.ssoplatform.idp.application.port.out.EmailOtpCredentialRepository;
 import com.ssoplatform.idp.application.port.out.TotpCredentialRepository;
 import com.ssoplatform.idp.application.port.out.TotpSecretEncryptor;
 import com.ssoplatform.idp.application.port.out.UserRepository;
+import com.ssoplatform.idp.domain.mfa.EmailOtpCredential;
 import com.ssoplatform.idp.domain.mfa.EncryptedTotpSecret;
 import com.ssoplatform.idp.domain.mfa.TotpCredential;
 import com.ssoplatform.idp.domain.user.User;
@@ -22,10 +24,11 @@ import java.util.Objects;
  * actually captured it correctly.
  *
  * <p>Refuses outright ({@link MfaAlreadyEnabledException}) if the user already has an ACTIVE
- * credential: re-enrollment must always go through an explicit {@code DisableMfaUseCase} first,
- * never silently replace a working second factor - see {@code phase_4_1_totp_mfa.md}. A leftover
- * {@code PENDING_ACTIVATION} credential from an abandoned earlier attempt, by contrast, is freely
- * replaced: it was never proven to work, so there is nothing to protect by keeping it.
+ * credential of EITHER method - since Phase 4.2, a user may have at most one active second factor
+ * (TOTP or e-mail OTP) at a time; switching methods means disabling the current one first via
+ * {@code DisableMfaUseCase}. A leftover {@code PENDING_ACTIVATION} TOTP credential from an
+ * abandoned earlier attempt, by contrast, is freely replaced: it was never proven to work, so
+ * there is nothing to protect by keeping it - see {@code phase_4_1_totp_mfa.md}.
  */
 public class EnrollTotpUseCase {
 
@@ -37,15 +40,19 @@ public class EnrollTotpUseCase {
 
     private final UserRepository userRepository;
     private final TotpCredentialRepository totpCredentialRepository;
+    private final EmailOtpCredentialRepository emailOtpCredentialRepository;
     private final TotpSecretEncryptor totpSecretEncryptor;
 
     public EnrollTotpUseCase(
             UserRepository userRepository,
             TotpCredentialRepository totpCredentialRepository,
+            EmailOtpCredentialRepository emailOtpCredentialRepository,
             TotpSecretEncryptor totpSecretEncryptor) {
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.totpCredentialRepository =
                 Objects.requireNonNull(totpCredentialRepository, "totpCredentialRepository must not be null");
+        this.emailOtpCredentialRepository =
+                Objects.requireNonNull(emailOtpCredentialRepository, "emailOtpCredentialRepository must not be null");
         this.totpSecretEncryptor =
                 Objects.requireNonNull(totpSecretEncryptor, "totpSecretEncryptor must not be null");
     }
@@ -59,6 +66,12 @@ public class EnrollTotpUseCase {
         totpCredentialRepository
                 .findByUserId(userId)
                 .filter(TotpCredential::isActive)
+                .ifPresent(credential -> {
+                    throw new MfaAlreadyEnabledException();
+                });
+        emailOtpCredentialRepository
+                .findByUserId(userId)
+                .filter(EmailOtpCredential::isActive)
                 .ifPresent(credential -> {
                     throw new MfaAlreadyEnabledException();
                 });

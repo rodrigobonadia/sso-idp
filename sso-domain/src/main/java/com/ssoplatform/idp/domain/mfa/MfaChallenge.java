@@ -12,21 +12,28 @@ import java.util.Objects;
 /**
  * A single-use, short-lived token bridging the two HTTP calls of a two-step (password + second
  * factor) login: {@code LoginUseCase} issues one once the password check succeeds for a user with
- * an active {@link TotpCredential}, instead of establishing a session immediately. Exactly the
+ * an active second-factor credential, instead of establishing a session immediately. Exactly the
  * same shape as {@code PasswordResetToken} (down to reusing {@link TokenHash} and both consumption
  * exceptions from {@code domain.verification}), except it also remembers {@link #tenantId()} -
  * unlike a password-reset link (which is only ever emailed to one already-known address), the
  * second step of login has no other way to know which tenant the original attempt was scoped to.
  *
+ * <p>Since Phase 4.2, also remembers {@link #method()} - which second factor this specific
+ * challenge must be satisfied with (TOTP or e-mail OTP), decided once at issuance time based on
+ * whichever credential was active for the user, and never re-derived later. See {@link
+ * MfaMethod}'s Javadoc for why this is stored rather than re-checked at verification time.
+ *
  * <p>Validity is deliberately much shorter than a password-reset token (5 minutes vs. 1 hour):
- * this token only ever needs to survive the time it takes a human to read a code off their
- * authenticator app and type it in, not the time it takes to notice and open an e-mail.
+ * this token only ever needs to survive the time it takes a human to read a code (off their
+ * authenticator app, or from an e-mail) and type it in, not the time it takes to notice and open
+ * an e-mail asking them to start a whole separate flow.
  */
 public final class MfaChallenge {
 
     private final MfaChallengeId id;
     private final UserId userId;
     private final TenantId tenantId;
+    private final MfaMethod method;
     private final TokenHash tokenHash;
     private final Instant expiresAt;
     private Instant consumedAt;
@@ -36,6 +43,7 @@ public final class MfaChallenge {
             MfaChallengeId id,
             UserId userId,
             TenantId tenantId,
+            MfaMethod method,
             TokenHash tokenHash,
             Instant expiresAt,
             Instant consumedAt,
@@ -43,6 +51,7 @@ public final class MfaChallenge {
         this.id = id;
         this.userId = userId;
         this.tenantId = tenantId;
+        this.method = method;
         this.tokenHash = tokenHash;
         this.expiresAt = expiresAt;
         this.consumedAt = consumedAt;
@@ -51,14 +60,15 @@ public final class MfaChallenge {
 
     /** Issues a brand-new challenge, valid from {@code now} for {@code validity}. */
     public static MfaChallenge issue(
-            UserId userId, TenantId tenantId, TokenHash tokenHash, Instant now, Duration validity) {
+            UserId userId, TenantId tenantId, MfaMethod method, TokenHash tokenHash, Instant now, Duration validity) {
         Objects.requireNonNull(userId, "userId must not be null");
         Objects.requireNonNull(tenantId, "tenantId must not be null");
+        Objects.requireNonNull(method, "method must not be null");
         Objects.requireNonNull(tokenHash, "tokenHash must not be null");
         Objects.requireNonNull(now, "now must not be null");
         Objects.requireNonNull(validity, "validity must not be null");
         return new MfaChallenge(
-                MfaChallengeId.generate(), userId, tenantId, tokenHash, now.plus(validity), null, now);
+                MfaChallengeId.generate(), userId, tenantId, method, tokenHash, now.plus(validity), null, now);
     }
 
     /** Reconstitutes a challenge that already exists (used by persistence adapters). */
@@ -66,6 +76,7 @@ public final class MfaChallenge {
             MfaChallengeId id,
             UserId userId,
             TenantId tenantId,
+            MfaMethod method,
             TokenHash tokenHash,
             Instant expiresAt,
             Instant consumedAt,
@@ -73,10 +84,11 @@ public final class MfaChallenge {
         Objects.requireNonNull(id, "id must not be null");
         Objects.requireNonNull(userId, "userId must not be null");
         Objects.requireNonNull(tenantId, "tenantId must not be null");
+        Objects.requireNonNull(method, "method must not be null");
         Objects.requireNonNull(tokenHash, "tokenHash must not be null");
         Objects.requireNonNull(expiresAt, "expiresAt must not be null");
         Objects.requireNonNull(createdAt, "createdAt must not be null");
-        return new MfaChallenge(id, userId, tenantId, tokenHash, expiresAt, consumedAt, createdAt);
+        return new MfaChallenge(id, userId, tenantId, method, tokenHash, expiresAt, consumedAt, createdAt);
     }
 
     /**
@@ -112,6 +124,10 @@ public final class MfaChallenge {
 
     public TenantId tenantId() {
         return tenantId;
+    }
+
+    public MfaMethod method() {
+        return method;
     }
 
     public TokenHash tokenHash() {

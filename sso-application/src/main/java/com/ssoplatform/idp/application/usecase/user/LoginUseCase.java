@@ -4,12 +4,21 @@ import com.ssoplatform.idp.application.exception.AccountDisabledException;
 import com.ssoplatform.idp.application.exception.AccountLockedException;
 import com.ssoplatform.idp.application.exception.AccountNotVerifiedException;
 import com.ssoplatform.idp.application.exception.InvalidCredentialsException;
+import com.ssoplatform.idp.application.port.out.EmailOtpCodeHasher;
+import com.ssoplatform.idp.application.port.out.EmailOtpCodeRepository;
+import com.ssoplatform.idp.application.port.out.EmailOtpCredentialRepository;
+import com.ssoplatform.idp.application.port.out.EmailSender;
 import com.ssoplatform.idp.application.port.out.MfaChallengeRepository;
 import com.ssoplatform.idp.application.port.out.PasswordHasher;
 import com.ssoplatform.idp.application.port.out.TotpCredentialRepository;
 import com.ssoplatform.idp.application.port.out.UserRepository;
 import com.ssoplatform.idp.application.port.out.VerificationTokenHasher;
+import com.ssoplatform.idp.domain.mfa.EmailOtpCode;
+import com.ssoplatform.idp.domain.mfa.EmailOtpCodeHash;
+import com.ssoplatform.idp.domain.mfa.EmailOtpCredential;
 import com.ssoplatform.idp.domain.mfa.MfaChallenge;
+import com.ssoplatform.idp.domain.mfa.MfaMethod;
+import com.ssoplatform.idp.domain.mfa.RawEmailOtpCode;
 import com.ssoplatform.idp.domain.mfa.TotpCredential;
 import com.ssoplatform.idp.domain.tenant.TenantId;
 import com.ssoplatform.idp.domain.user.Email;
@@ -42,6 +51,14 @@ import java.util.Objects;
  * caller learns "this account requires a second factor" only once they have proven everything
  * else about their claim to it.
  *
+ * <p>Since Phase 4.2, TWO possible second-factor methods exist - TOTP and e-mail OTP - but a user
+ * may have at most one ACTIVE at a time (see {@code EnableEmailOtpUseCase}/{@code
+ * EnrollTotpUseCase}), so checking TOTP first and e-mail OTP second is unambiguous: at most one of
+ * the two branches below can ever fire. Unlike a TOTP challenge (nothing to do server-side besides
+ * issue the bridging token - the user's authenticator app already knows how to produce a code), an
+ * e-mail OTP challenge must ALSO generate and send the actual code at this exact moment, since
+ * there is no shared secret for the verification step to derive one from later.
+ *
  * <p>The candidate password is compared as a plain {@code String} ({@link
  * PasswordHasher#matches(String, com.ssoplatform.idp.domain.user.HashedPassword)}), never through
  * {@link com.ssoplatform.idp.domain.user.RawPassword#of(String)}: that factory enforces the
@@ -57,12 +74,18 @@ import java.util.Objects;
 public class LoginUseCase {
 
     /** How long a freshly issued MFA challenge remains valid - see {@link MfaChallenge}'s Javadoc
-     * for why this is much shorter than a password-reset token. */
+     * for why this is much shorter than a password-reset token. Also governs the e-mail OTP
+     * code's own validity when the active method is {@link MfaMethod#EMAIL_OTP} - see {@code
+     * EmailOtpCode}'s Javadoc for why the two are kept equal rather than allowed to drift apart. */
     static final Duration MFA_CHALLENGE_VALIDITY = Duration.ofMinutes(5);
 
     private final UserRepository userRepository;
     private final PasswordHasher passwordHasher;
     private final TotpCredentialRepository totpCredentialRepository;
+    private final EmailOtpCredentialRepository emailOtpCredentialRepository;
+    private final EmailOtpCodeRepository emailOtpCodeRepository;
+    private final EmailOtpCodeHasher emailOtpCodeHasher;
+    private final EmailSender emailSender;
     private final MfaChallengeRepository mfaChallengeRepository;
     private final VerificationTokenHasher verificationTokenHasher;
 
@@ -70,12 +93,22 @@ public class LoginUseCase {
             UserRepository userRepository,
             PasswordHasher passwordHasher,
             TotpCredentialRepository totpCredentialRepository,
+            EmailOtpCredentialRepository emailOtpCredentialRepository,
+            EmailOtpCodeRepository emailOtpCodeRepository,
+            EmailOtpCodeHasher emailOtpCodeHasher,
+            EmailSender emailSender,
             MfaChallengeRepository mfaChallengeRepository,
             VerificationTokenHasher verificationTokenHasher) {
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.passwordHasher = Objects.requireNonNull(passwordHasher, "passwordHasher must not be null");
         this.totpCredentialRepository =
                 Objects.requireNonNull(totpCredentialRepository, "totpCredentialRepository must not be null");
+        this.emailOtpCredentialRepository =
+                Objects.requireNonNull(emailOtpCredentialRepository, "emailOtpCredentialRepository must not be null");
+        this.emailOtpCodeRepository =
+                Objects.requireNonNull(emailOtpCodeRepository, "emailOtpCodeRepository must not be null");
+        this.emailOtpCodeHasher = Objects.requireNonNull(emailOtpCodeHasher, "emailOtpCodeHasher must not be null");
+        this.emailSender = Objects.requireNonNull(emailSender, "emailSender must not be null");
         this.mfaChallengeRepository =
                 Objects.requireNonNull(mfaChallengeRepository, "mfaChallengeRepository must not be null");
         this.verificationTokenHasher =
@@ -106,24 +139,49 @@ public class LoginUseCase {
         user.recordSuccessfulLogin();
         User saved = userRepository.save(user);
 
-        boolean mfaActive = totpCredentialRepository
+        boolean totpActive =
+                totpCredentialRepository.findByUserId(saved.id()).map(TotpCredential::isActive).orElse(false);
+        if (totpActive) {
+            String challengeToken = issueMfaChallenge(saved, tenantId, MfaMethod.TOTP);
+            return new LoginOutcome.MfaChallengeIssued(challengeToken, MfaMethod.TOTP);
+        }
+
+        boolean emailOtpActive = emailOtpCredentialRepository
                 .findByUserId(saved.id())
-                .map(TotpCredential::isActive)
+                .map(EmailOtpCredential::isActive)
                 .orElse(false);
-        if (mfaActive) {
-            return new LoginOutcome.MfaChallengeIssued(issueMfaChallenge(saved, tenantId));
+        if (emailOtpActive) {
+            String challengeToken = issueMfaChallenge(saved, tenantId, MfaMethod.EMAIL_OTP);
+            return new LoginOutcome.MfaChallengeIssued(challengeToken, MfaMethod.EMAIL_OTP);
         }
 
         return new LoginOutcome.Authenticated(
                 new LoginResult(saved.id().value(), saved.tenantId().value(), saved.email().value()));
     }
 
-    private String issueMfaChallenge(User user, TenantId tenantId) {
+    private String issueMfaChallenge(User user, TenantId tenantId, MfaMethod method) {
         RawVerificationToken rawToken = RawVerificationToken.generate();
         TokenHash tokenHash = verificationTokenHasher.hash(rawToken);
-        MfaChallenge challenge = MfaChallenge.issue(user.id(), tenantId, tokenHash, Instant.now(), MFA_CHALLENGE_VALIDITY);
+        MfaChallenge challenge =
+                MfaChallenge.issue(user.id(), tenantId, method, tokenHash, Instant.now(), MFA_CHALLENGE_VALIDITY);
         mfaChallengeRepository.save(challenge);
+
+        if (method == MfaMethod.EMAIL_OTP) {
+            sendChallengeCode(user, challenge);
+        }
         return rawToken.value();
+    }
+
+    /** Generates and e-mails the actual code for an e-mail-OTP challenge - the one thing a TOTP
+     * challenge never needs, since the user's authenticator app already has everything it needs
+     * to produce a code without this system sending anything. */
+    private void sendChallengeCode(User user, MfaChallenge challenge) {
+        RawEmailOtpCode rawCode = RawEmailOtpCode.generate();
+        EmailOtpCodeHash codeHash = emailOtpCodeHasher.hash(rawCode);
+        EmailOtpCode code = EmailOtpCode.issueForChallenge(
+                user.id(), challenge.id(), codeHash, Instant.now(), MFA_CHALLENGE_VALIDITY);
+        emailOtpCodeRepository.save(code);
+        emailSender.sendMfaEmailOtpCode(user.email(), rawCode);
     }
 
     private User findUserOrFail(TenantId tenantId, String rawEmail) {

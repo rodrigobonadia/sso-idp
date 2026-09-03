@@ -79,10 +79,11 @@ public class LoginPageController {
                 case LoginOutcome.MfaChallengeIssued issued -> {
                     // Kept entirely server-side (never a URL query parameter, which would leak it
                     // via browser history/Referer) - see MfaChallengePageController's Javadoc.
-                    request.getSession(true)
-                            .setAttribute(
-                                    MfaChallengePageController.CHALLENGE_TOKEN_SESSION_ATTRIBUTE,
-                                    issued.challengeToken());
+                    var session = request.getSession(true);
+                    session.setAttribute(
+                            MfaChallengePageController.CHALLENGE_TOKEN_SESSION_ATTRIBUTE, issued.challengeToken());
+                    session.setAttribute(
+                            MfaChallengePageController.MFA_METHOD_SESSION_ATTRIBUTE, issued.method().name());
                     yield "redirect:/login/mfa";
                 }
             };

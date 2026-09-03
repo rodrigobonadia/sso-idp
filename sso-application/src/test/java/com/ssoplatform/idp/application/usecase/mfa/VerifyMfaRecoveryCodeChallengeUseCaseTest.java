@@ -16,6 +16,7 @@ import com.ssoplatform.idp.application.port.out.UserRepository;
 import com.ssoplatform.idp.application.port.out.VerificationTokenHasher;
 import com.ssoplatform.idp.application.usecase.user.LoginResult;
 import com.ssoplatform.idp.domain.mfa.MfaChallenge;
+import com.ssoplatform.idp.domain.mfa.MfaMethod;
 import com.ssoplatform.idp.domain.mfa.RawRecoveryCode;
 import com.ssoplatform.idp.domain.mfa.RecoveryCode;
 import com.ssoplatform.idp.domain.mfa.RecoveryCodeHash;
@@ -73,7 +74,7 @@ class VerifyMfaRecoveryCodeChallengeUseCaseTest {
                 HashedPassword.of("$2a$10$somehashvalue"));
         tokenHash = TokenHash.of("some-hash-value");
         when(verificationTokenHasher.hash(any(RawVerificationToken.class))).thenReturn(tokenHash);
-        challenge = MfaChallenge.issue(user.id(), TENANT_ID, tokenHash, Instant.now(), Duration.ofMinutes(5));
+        challenge = MfaChallenge.issue(user.id(), TENANT_ID, MfaMethod.TOTP, tokenHash, Instant.now(), Duration.ofMinutes(5));
         when(mfaChallengeRepository.findByTokenHash(tokenHash)).thenReturn(Optional.of(challenge));
     }
 

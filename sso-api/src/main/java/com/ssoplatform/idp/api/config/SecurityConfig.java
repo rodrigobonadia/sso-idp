@@ -150,6 +150,12 @@ import org.springframework.security.web.util.matcher.OrRequestMatcher;
  * are deliberately NOT listed here: managing one's own MFA settings requires an existing session,
  * exactly like {@code /api/account/change-password}, so they fall under the default {@code
  * anyRequest().authenticated()} rule.
+ *
+ * <p>{@code /api/mfa/challenge/email-otp} (Phase 4.2) is permitted unauthenticated for the exact
+ * same reason as {@code /api/mfa/challenge/totp}: it is the second step of login itself, identified
+ * only by the challenge token, not a session. {@code /api/mfa/email-otp/enable} and {@code
+ * /api/mfa/email-otp/confirm} are, symmetrically with the TOTP pair above, deliberately NOT listed
+ * here - managing this MFA method also requires an existing session.
  */
 @Configuration
 @EnableWebSecurity
@@ -183,7 +189,8 @@ public class SecurityConfig {
                                 "/api/forgot-password",
                                 "/api/reset-password",
                                 "/api/mfa/challenge/totp",
-                                "/api/mfa/challenge/recovery-code")
+                                "/api/mfa/challenge/recovery-code",
+                                "/api/mfa/challenge/email-otp")
                         .permitAll()
                         .anyRequest()
                         .authenticated())

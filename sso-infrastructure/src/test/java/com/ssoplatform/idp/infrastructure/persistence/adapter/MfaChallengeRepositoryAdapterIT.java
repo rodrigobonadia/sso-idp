@@ -3,6 +3,7 @@ package com.ssoplatform.idp.infrastructure.persistence.adapter;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ssoplatform.idp.domain.mfa.MfaChallenge;
+import com.ssoplatform.idp.domain.mfa.MfaMethod;
 import com.ssoplatform.idp.domain.tenant.Tenant;
 import com.ssoplatform.idp.domain.tenant.TenantSlug;
 import com.ssoplatform.idp.domain.user.Email;
@@ -68,8 +69,8 @@ class MfaChallengeRepositoryAdapterIT {
     @Test
     void savesAndReloadsAChallengeByItsHash() {
         TokenHash tokenHash = TokenHash.of("hash-" + System.nanoTime());
-        MfaChallenge challenge =
-                MfaChallenge.issue(user.id(), tenant.id(), tokenHash, Instant.now(), Duration.ofMinutes(5));
+        MfaChallenge challenge = MfaChallenge.issue(
+                user.id(), tenant.id(), MfaMethod.TOTP, tokenHash, Instant.now(), Duration.ofMinutes(5));
 
         mfaChallengeRepository.save(challenge);
         Optional<MfaChallenge> reloaded = mfaChallengeRepository.findByTokenHash(tokenHash);
@@ -77,7 +78,21 @@ class MfaChallengeRepositoryAdapterIT {
         assertThat(reloaded).isPresent();
         assertThat(reloaded.get().userId()).isEqualTo(user.id());
         assertThat(reloaded.get().tenantId()).isEqualTo(tenant.id());
+        assertThat(reloaded.get().method()).isEqualTo(MfaMethod.TOTP);
         assertThat(reloaded.get().isConsumed()).isFalse();
+    }
+
+    @Test
+    void savesAndReloadsAnEmailOtpChallengeWithItsMethodPreserved() {
+        TokenHash tokenHash = TokenHash.of("hash-email-otp-" + System.nanoTime());
+        MfaChallenge challenge = MfaChallenge.issue(
+                user.id(), tenant.id(), MfaMethod.EMAIL_OTP, tokenHash, Instant.now(), Duration.ofMinutes(5));
+
+        mfaChallengeRepository.save(challenge);
+        Optional<MfaChallenge> reloaded = mfaChallengeRepository.findByTokenHash(tokenHash);
+
+        assertThat(reloaded).isPresent();
+        assertThat(reloaded.get().method()).isEqualTo(MfaMethod.EMAIL_OTP);
     }
 
     @Test
@@ -88,8 +103,8 @@ class MfaChallengeRepositoryAdapterIT {
     @Test
     void reloadsAConsumedChallengeWithItsConsumedAtPreserved() {
         TokenHash tokenHash = TokenHash.of("hash-consumed-" + System.nanoTime());
-        MfaChallenge challenge =
-                MfaChallenge.issue(user.id(), tenant.id(), tokenHash, Instant.now(), Duration.ofMinutes(5));
+        MfaChallenge challenge = MfaChallenge.issue(
+                user.id(), tenant.id(), MfaMethod.TOTP, tokenHash, Instant.now(), Duration.ofMinutes(5));
         challenge.consume(Instant.now());
 
         mfaChallengeRepository.save(challenge);

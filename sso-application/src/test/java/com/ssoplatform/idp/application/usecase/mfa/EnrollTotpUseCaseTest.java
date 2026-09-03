@@ -9,9 +9,11 @@ import static org.mockito.Mockito.when;
 
 import com.ssoplatform.idp.application.exception.MfaAlreadyEnabledException;
 import com.ssoplatform.idp.application.exception.UserNotFoundException;
+import com.ssoplatform.idp.application.port.out.EmailOtpCredentialRepository;
 import com.ssoplatform.idp.application.port.out.TotpCredentialRepository;
 import com.ssoplatform.idp.application.port.out.TotpSecretEncryptor;
 import com.ssoplatform.idp.application.port.out.UserRepository;
+import com.ssoplatform.idp.domain.mfa.EmailOtpCredential;
 import com.ssoplatform.idp.domain.mfa.EncryptedTotpSecret;
 import com.ssoplatform.idp.domain.mfa.TotpCredential;
 import com.ssoplatform.idp.domain.tenant.TenantId;
@@ -40,6 +42,9 @@ class EnrollTotpUseCaseTest {
     private TotpCredentialRepository totpCredentialRepository;
 
     @Mock
+    private EmailOtpCredentialRepository emailOtpCredentialRepository;
+
+    @Mock
     private TotpSecretEncryptor totpSecretEncryptor;
 
     private EnrollTotpUseCase useCase;
@@ -47,7 +52,8 @@ class EnrollTotpUseCaseTest {
 
     @BeforeEach
     void setUp() {
-        useCase = new EnrollTotpUseCase(userRepository, totpCredentialRepository, totpSecretEncryptor);
+        useCase = new EnrollTotpUseCase(
+                userRepository, totpCredentialRepository, emailOtpCredentialRepository, totpSecretEncryptor);
         user = User.register(
                 TENANT_ID,
                 Email.of("someone@example.com"),
@@ -90,12 +96,29 @@ class EnrollTotpUseCaseTest {
     }
 
     @Test
-    void rejectsEnrollmentWhenAnActiveCredentialAlreadyExists() {
+    void rejectsEnrollmentWhenAnActiveTotpCredentialAlreadyExists() {
         when(userRepository.findById(user.id())).thenReturn(Optional.of(user));
         TotpCredential active =
                 TotpCredential.enroll(user.id(), EncryptedTotpSecret.of("YWN0aXZlLWNpcGhlcnRleHQ="), Instant.now());
         active.activate(Instant.now());
         when(totpCredentialRepository.findByUserId(user.id())).thenReturn(Optional.of(active));
+
+        assertThatThrownBy(() -> useCase.execute(new EnrollTotpCommand(user.id().value())))
+                .isInstanceOf(MfaAlreadyEnabledException.class);
+
+        verify(totpCredentialRepository, never()).deleteByUserId(any());
+        verify(totpCredentialRepository, never()).save(any());
+    }
+
+    /** Phase 4.2: the reverse-method check - TOTP enrollment must also refuse when e-mail OTP,
+     * not TOTP, is the user's currently active method (a user may have at most one). */
+    @Test
+    void rejectsEnrollmentWhenAnActiveEmailOtpCredentialAlreadyExists() {
+        when(userRepository.findById(user.id())).thenReturn(Optional.of(user));
+        when(totpCredentialRepository.findByUserId(user.id())).thenReturn(Optional.empty());
+        EmailOtpCredential activeEmailOtp = EmailOtpCredential.enable(user.id(), Instant.now());
+        activeEmailOtp.activate(Instant.now());
+        when(emailOtpCredentialRepository.findByUserId(user.id())).thenReturn(Optional.of(activeEmailOtp));
 
         assertThatThrownBy(() -> useCase.execute(new EnrollTotpCommand(user.id().value())))
                 .isInstanceOf(MfaAlreadyEnabledException.class);

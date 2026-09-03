@@ -1,6 +1,7 @@
 package com.ssoplatform.idp.infrastructure.notification;
 
 import com.ssoplatform.idp.application.port.out.EmailSender;
+import com.ssoplatform.idp.domain.mfa.RawEmailOtpCode;
 import com.ssoplatform.idp.domain.user.Email;
 import com.ssoplatform.idp.domain.verification.RawVerificationToken;
 import org.slf4j.Logger;
@@ -9,11 +10,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
- * Implements the {@link EmailSender} output port by logging the verification link instead of
- * actually sending an e-mail. Phase 2.2 has no real provider integration yet (SMTP, SendGrid,
- * SES, ...) - this adapter exists so the registration flow is fully testable end-to-end without
- * one, and is swappable later for a real adapter without any use case changing, since both
- * implement the same {@link EmailSender} port.
+ * Implements the {@link EmailSender} output port by logging the verification link (or, since
+ * Phase 4.2, the OTP code itself) instead of actually sending an e-mail. Phase 2.2 has no real
+ * provider integration yet (SMTP, SendGrid, SES, ...) - this adapter exists so every flow that
+ * needs outbound e-mail is fully testable end-to-end without one, and is swappable later for a
+ * real adapter without any use case changing, since both implement the same {@link EmailSender}
+ * port.
  *
  * <p>The link scheme/port defaulted here ({@code http} on {@code server.port}) match local
  * development; a real deployment behind TLS would override {@code app.mail.link-scheme} to
@@ -50,5 +52,10 @@ public class MockEmailSenderAdapter implements EmailSender {
         String resetUrl = "%s://%s.%s:%s/reset-password?token=%s"
                 .formatted(linkScheme, tenantSlug, tenantBaseDomain, serverPort, token.value());
         log.info("[MOCK EMAIL] Password reset link for {}: {}", recipient.value(), resetUrl);
+    }
+
+    @Override
+    public void sendMfaEmailOtpCode(Email recipient, RawEmailOtpCode code) {
+        log.info("[MOCK EMAIL] MFA one-time code for {}: {}", recipient.value(), code.value());
     }
 }

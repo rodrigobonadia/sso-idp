@@ -12,12 +12,19 @@ import com.ssoplatform.idp.application.exception.AccountDisabledException;
 import com.ssoplatform.idp.application.exception.AccountLockedException;
 import com.ssoplatform.idp.application.exception.AccountNotVerifiedException;
 import com.ssoplatform.idp.application.exception.InvalidCredentialsException;
+import com.ssoplatform.idp.application.port.out.EmailOtpCodeHasher;
+import com.ssoplatform.idp.application.port.out.EmailOtpCodeRepository;
+import com.ssoplatform.idp.application.port.out.EmailOtpCredentialRepository;
+import com.ssoplatform.idp.application.port.out.EmailSender;
 import com.ssoplatform.idp.application.port.out.MfaChallengeRepository;
 import com.ssoplatform.idp.application.port.out.PasswordHasher;
 import com.ssoplatform.idp.application.port.out.TotpCredentialRepository;
 import com.ssoplatform.idp.application.port.out.UserRepository;
 import com.ssoplatform.idp.application.port.out.VerificationTokenHasher;
+import com.ssoplatform.idp.domain.mfa.EmailOtpCodeHash;
+import com.ssoplatform.idp.domain.mfa.EmailOtpCredential;
 import com.ssoplatform.idp.domain.mfa.EncryptedTotpSecret;
+import com.ssoplatform.idp.domain.mfa.MfaMethod;
 import com.ssoplatform.idp.domain.mfa.TotpCredential;
 import com.ssoplatform.idp.domain.tenant.TenantId;
 import com.ssoplatform.idp.domain.user.Email;
@@ -49,6 +56,18 @@ class LoginUseCaseTest {
     private TotpCredentialRepository totpCredentialRepository;
 
     @Mock
+    private EmailOtpCredentialRepository emailOtpCredentialRepository;
+
+    @Mock
+    private EmailOtpCodeRepository emailOtpCodeRepository;
+
+    @Mock
+    private EmailOtpCodeHasher emailOtpCodeHasher;
+
+    @Mock
+    private EmailSender emailSender;
+
+    @Mock
     private MfaChallengeRepository mfaChallengeRepository;
 
     @Mock
@@ -59,7 +78,15 @@ class LoginUseCaseTest {
     @BeforeEach
     void setUp() {
         useCase = new LoginUseCase(
-                userRepository, passwordHasher, totpCredentialRepository, mfaChallengeRepository, verificationTokenHasher);
+                userRepository,
+                passwordHasher,
+                totpCredentialRepository,
+                emailOtpCredentialRepository,
+                emailOtpCodeRepository,
+                emailOtpCodeHasher,
+                emailSender,
+                mfaChallengeRepository,
+                verificationTokenHasher);
     }
 
     private User activeUser() {
@@ -81,6 +108,7 @@ class LoginUseCaseTest {
         when(passwordHasher.matches(any(String.class), eq(PASSWORD_HASH))).thenReturn(true);
         when(userRepository.save(user)).thenReturn(user);
         when(totpCredentialRepository.findByUserId(user.id())).thenReturn(Optional.empty());
+        when(emailOtpCredentialRepository.findByUserId(user.id())).thenReturn(Optional.empty());
 
         LoginOutcome outcome =
                 useCase.execute(new LoginCommand(TENANT_ID.value(), "someone@example.com", "Str0ng!Passw0rd"));
@@ -93,6 +121,7 @@ class LoginUseCaseTest {
         assertThat(user.failedLoginAttempts()).isZero();
         verify(userRepository).save(user);
         verify(mfaChallengeRepository, never()).save(any());
+        verify(emailSender, never()).sendMfaEmailOtpCode(any(), any());
     }
 
     @Test
@@ -112,11 +141,41 @@ class LoginUseCaseTest {
                 useCase.execute(new LoginCommand(TENANT_ID.value(), "someone@example.com", "Str0ng!Passw0rd"));
 
         assertThat(outcome).isInstanceOf(LoginOutcome.MfaChallengeIssued.class);
-        String challengeToken = ((LoginOutcome.MfaChallengeIssued) outcome).challengeToken();
-        assertThat(challengeToken).isNotBlank();
+        LoginOutcome.MfaChallengeIssued issued = (LoginOutcome.MfaChallengeIssued) outcome;
+        assertThat(issued.challengeToken()).isNotBlank();
+        assertThat(issued.method()).isEqualTo(MfaMethod.TOTP);
         verify(mfaChallengeRepository).save(any());
+        verify(emailOtpCredentialRepository, never()).findByUserId(any());
+        verify(emailSender, never()).sendMfaEmailOtpCode(any(), any());
         // The password check and account-status transition already ran (failed attempts reset,
         // status validated) - only session establishment is deferred, not authentication itself.
+        assertThat(user.failedLoginAttempts()).isZero();
+    }
+
+    @Test
+    void issuesAnMfaChallengeWithEmailOtpMethodAndSendsACodeWhenTheUserHasAnActiveEmailOtpCredential() {
+        User user = activeUser();
+        when(userRepository.findByTenantIdAndEmail(TENANT_ID, Email.of("someone@example.com")))
+                .thenReturn(Optional.of(user));
+        when(passwordHasher.matches(any(String.class), eq(PASSWORD_HASH))).thenReturn(true);
+        when(userRepository.save(user)).thenReturn(user);
+        when(totpCredentialRepository.findByUserId(user.id())).thenReturn(Optional.empty());
+        EmailOtpCredential activeEmailOtpCredential = EmailOtpCredential.enable(user.id(), Instant.now());
+        activeEmailOtpCredential.activate(Instant.now());
+        when(emailOtpCredentialRepository.findByUserId(user.id())).thenReturn(Optional.of(activeEmailOtpCredential));
+        when(verificationTokenHasher.hash(any())).thenReturn(TokenHash.of("some-hash"));
+        when(emailOtpCodeHasher.hash(any())).thenReturn(EmailOtpCodeHash.of("some-code-hash"));
+
+        LoginOutcome outcome =
+                useCase.execute(new LoginCommand(TENANT_ID.value(), "someone@example.com", "Str0ng!Passw0rd"));
+
+        assertThat(outcome).isInstanceOf(LoginOutcome.MfaChallengeIssued.class);
+        LoginOutcome.MfaChallengeIssued issued = (LoginOutcome.MfaChallengeIssued) outcome;
+        assertThat(issued.challengeToken()).isNotBlank();
+        assertThat(issued.method()).isEqualTo(MfaMethod.EMAIL_OTP);
+        verify(mfaChallengeRepository).save(any());
+        verify(emailOtpCodeRepository).save(any());
+        verify(emailSender).sendMfaEmailOtpCode(eq(user.email()), any());
         assertThat(user.failedLoginAttempts()).isZero();
     }
 
@@ -130,12 +189,32 @@ class LoginUseCaseTest {
         TotpCredential pendingCredential =
                 TotpCredential.enroll(user.id(), EncryptedTotpSecret.of("ciphertext"), Instant.now());
         when(totpCredentialRepository.findByUserId(user.id())).thenReturn(Optional.of(pendingCredential));
+        when(emailOtpCredentialRepository.findByUserId(user.id())).thenReturn(Optional.empty());
 
         LoginOutcome outcome =
                 useCase.execute(new LoginCommand(TENANT_ID.value(), "someone@example.com", "Str0ng!Passw0rd"));
 
         assertThat(outcome).isInstanceOf(LoginOutcome.Authenticated.class);
         verify(mfaChallengeRepository, never()).save(any());
+    }
+
+    @Test
+    void doesNotIssueAChallengeForAPendingUnconfirmedEmailOtpCredential() {
+        User user = activeUser();
+        when(userRepository.findByTenantIdAndEmail(TENANT_ID, Email.of("someone@example.com")))
+                .thenReturn(Optional.of(user));
+        when(passwordHasher.matches(any(String.class), eq(PASSWORD_HASH))).thenReturn(true);
+        when(userRepository.save(user)).thenReturn(user);
+        when(totpCredentialRepository.findByUserId(user.id())).thenReturn(Optional.empty());
+        EmailOtpCredential pendingCredential = EmailOtpCredential.enable(user.id(), Instant.now());
+        when(emailOtpCredentialRepository.findByUserId(user.id())).thenReturn(Optional.of(pendingCredential));
+
+        LoginOutcome outcome =
+                useCase.execute(new LoginCommand(TENANT_ID.value(), "someone@example.com", "Str0ng!Passw0rd"));
+
+        assertThat(outcome).isInstanceOf(LoginOutcome.Authenticated.class);
+        verify(mfaChallengeRepository, never()).save(any());
+        verify(emailSender, never()).sendMfaEmailOtpCode(any(), any());
     }
 
     @Test

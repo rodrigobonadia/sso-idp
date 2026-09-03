@@ -9,35 +9,55 @@
 
 <p th:if="${errorMessage}" th:text="${errorMessage}" style="color: red;"></p>
 
-<!-- Recovery codes: shown exactly once, right after a successful enrollment confirmation. -->
+<!-- Recovery codes: shown exactly once, right after a successful enrollment confirmation
+     (either method). -->
 <div th:if="${recoveryCodes}">
     <p>Two-factor authentication is now enabled. Save these recovery codes somewhere safe - each
-       one can be used once if you lose access to your authenticator app, and they will not be
-       shown again.</p>
+       one can be used once if you lose access to your authenticator app or e-mail, and they will
+       not be shown again.</p>
     <ul>
         <li th:each="rc : ${recoveryCodes}" th:text="${rc}"></li>
     </ul>
     <p><a th:href="@{/account}">Back to my account</a></p>
 </div>
 
-<!-- Pending enrollment: shown right after "Enable two-factor authentication" is submitted. -->
-<div th:if="${pendingSecret != null and recoveryCodes == null}">
+<!-- Pending TOTP enrollment: shown right after "Enable authenticator app" is submitted. -->
+<div th:if="${recoveryCodes == null and pendingSecret != null}">
     <p>Scan this into your authenticator app, or enter the secret manually, then enter the code it
        produces below to finish enabling two-factor authentication.</p>
     <p>Secret: <span th:text="${pendingSecret}"></span></p>
     <p>URI: <span th:text="${pendingOtpauthUri}"></span></p>
-    <form th:action="@{/account/mfa/confirm}" th:object="${confirmForm}" method="post">
+    <form th:action="@{/account/mfa/totp/confirm}" th:object="${confirmForm}" method="post">
         <div>
-            <label for="code">Code</label>
-            <input type="text" id="code" th:field="*{code}" inputmode="numeric" autocomplete="one-time-code" />
+            <label for="totpCode">Code</label>
+            <input type="text" id="totpCode" th:field="*{code}" inputmode="numeric" autocomplete="one-time-code" />
         </div>
         <button type="submit">Confirm</button>
     </form>
 </div>
 
-<!-- Steady state: MFA already enabled, offer to disable it. -->
-<div th:if="${pendingSecret == null and recoveryCodes == null and mfaEnabled}">
-    <p>Two-factor authentication is currently enabled.</p>
+<!-- Pending e-mail OTP enrollment: shown right after "Enable e-mail codes" is submitted (and
+     kept on screen, without re-showing the masked address, after a wrong confirm attempt). -->
+<div th:if="${recoveryCodes == null and pendingSecret == null and emailOtpPending}">
+    <p>
+        We sent a one-time code to
+        <span th:if="${pendingEmailOtpMaskedEmail}" th:text="${pendingEmailOtpMaskedEmail}"></span>
+        <span th:unless="${pendingEmailOtpMaskedEmail}">your registered e-mail address</span>.
+        Enter it below to finish enabling two-factor authentication.
+    </p>
+    <form th:action="@{/account/mfa/email-otp/confirm}" th:object="${emailOtpConfirmForm}" method="post">
+        <div>
+            <label for="emailOtpCode">Code</label>
+            <input type="text" id="emailOtpCode" th:field="*{code}" inputmode="numeric" autocomplete="one-time-code" />
+        </div>
+        <button type="submit">Confirm</button>
+    </form>
+</div>
+
+<!-- Steady state: MFA already enabled (either method), offer to disable it. -->
+<div th:if="${recoveryCodes == null and pendingSecret == null and !emailOtpPending and mfaEnabled}">
+    <p>Two-factor authentication is currently enabled
+       (<span th:text="${mfaMethod == 'EMAIL_OTP'} ? 'e-mail codes' : 'authenticator app'"></span>).</p>
     <form th:action="@{/account/mfa/disable}" th:object="${disableForm}" method="post">
         <div>
             <label for="currentPassword">Current password</label>
@@ -47,11 +67,14 @@
     </form>
 </div>
 
-<!-- Steady state: MFA not enabled, offer to enable it. -->
-<div th:if="${pendingSecret == null and recoveryCodes == null and !mfaEnabled}">
+<!-- Steady state: MFA not enabled, offer to enable either method. -->
+<div th:if="${recoveryCodes == null and pendingSecret == null and !emailOtpPending and !mfaEnabled}">
     <p>Two-factor authentication is currently disabled.</p>
-    <form th:action="@{/account/mfa/enroll}" method="post">
-        <button type="submit">Enable two-factor authentication</button>
+    <form th:action="@{/account/mfa/totp/enroll}" method="post">
+        <button type="submit">Enable with an authenticator app</button>
+    </form>
+    <form th:action="@{/account/mfa/email-otp/enable}" method="post">
+        <button type="submit">Enable with e-mail codes</button>
     </form>
 </div>
 

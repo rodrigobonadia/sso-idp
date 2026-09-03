@@ -5,6 +5,9 @@ import com.ssoplatform.idp.application.port.out.ClientResourceAuthorizationRepos
 import com.ssoplatform.idp.application.port.out.ClientSecretHasher;
 import com.ssoplatform.idp.application.port.out.CodeVerifierValidator;
 import com.ssoplatform.idp.application.port.out.DeviceCodeRepository;
+import com.ssoplatform.idp.application.port.out.EmailOtpCodeHasher;
+import com.ssoplatform.idp.application.port.out.EmailOtpCodeRepository;
+import com.ssoplatform.idp.application.port.out.EmailOtpCredentialRepository;
 import com.ssoplatform.idp.application.port.out.EmailSender;
 import com.ssoplatform.idp.application.port.out.JwtSigner;
 import com.ssoplatform.idp.application.port.out.JwtVerifier;
@@ -31,10 +34,13 @@ import com.ssoplatform.idp.application.usecase.device.DecideDeviceAuthorizationU
 import com.ssoplatform.idp.application.usecase.device.FindDeviceAuthorizationUseCase;
 import com.ssoplatform.idp.application.usecase.device.RequestDeviceAuthorizationUseCase;
 import com.ssoplatform.idp.application.usecase.introspection.IntrospectTokenUseCase;
+import com.ssoplatform.idp.application.usecase.mfa.ConfirmEmailOtpEnrollmentUseCase;
 import com.ssoplatform.idp.application.usecase.mfa.ConfirmTotpEnrollmentUseCase;
 import com.ssoplatform.idp.application.usecase.mfa.DisableMfaUseCase;
+import com.ssoplatform.idp.application.usecase.mfa.EnableEmailOtpUseCase;
 import com.ssoplatform.idp.application.usecase.mfa.EnrollTotpUseCase;
 import com.ssoplatform.idp.application.usecase.mfa.GetMfaStatusUseCase;
+import com.ssoplatform.idp.application.usecase.mfa.VerifyMfaEmailOtpChallengeUseCase;
 import com.ssoplatform.idp.application.usecase.mfa.VerifyMfaRecoveryCodeChallengeUseCase;
 import com.ssoplatform.idp.application.usecase.mfa.VerifyMfaTotpChallengeUseCase;
 import com.ssoplatform.idp.application.usecase.revocation.RevokeTokenUseCase;
@@ -106,10 +112,22 @@ public class UseCaseConfiguration {
             UserRepository userRepository,
             PasswordHasher passwordHasher,
             TotpCredentialRepository totpCredentialRepository,
+            EmailOtpCredentialRepository emailOtpCredentialRepository,
+            EmailOtpCodeRepository emailOtpCodeRepository,
+            EmailOtpCodeHasher emailOtpCodeHasher,
+            EmailSender emailSender,
             MfaChallengeRepository mfaChallengeRepository,
             VerificationTokenHasher verificationTokenHasher) {
         return new LoginUseCase(
-                userRepository, passwordHasher, totpCredentialRepository, mfaChallengeRepository, verificationTokenHasher);
+                userRepository,
+                passwordHasher,
+                totpCredentialRepository,
+                emailOtpCredentialRepository,
+                emailOtpCodeRepository,
+                emailOtpCodeHasher,
+                emailSender,
+                mfaChallengeRepository,
+                verificationTokenHasher);
     }
 
     @Bean
@@ -247,13 +265,17 @@ public class UseCaseConfiguration {
     public EnrollTotpUseCase enrollTotpUseCase(
             UserRepository userRepository,
             TotpCredentialRepository totpCredentialRepository,
+            EmailOtpCredentialRepository emailOtpCredentialRepository,
             TotpSecretEncryptor totpSecretEncryptor) {
-        return new EnrollTotpUseCase(userRepository, totpCredentialRepository, totpSecretEncryptor);
+        return new EnrollTotpUseCase(
+                userRepository, totpCredentialRepository, emailOtpCredentialRepository, totpSecretEncryptor);
     }
 
     @Bean
-    public GetMfaStatusUseCase getMfaStatusUseCase(TotpCredentialRepository totpCredentialRepository) {
-        return new GetMfaStatusUseCase(totpCredentialRepository);
+    public GetMfaStatusUseCase getMfaStatusUseCase(
+            TotpCredentialRepository totpCredentialRepository,
+            EmailOtpCredentialRepository emailOtpCredentialRepository) {
+        return new GetMfaStatusUseCase(totpCredentialRepository, emailOtpCredentialRepository);
     }
 
     @Bean
@@ -272,8 +294,10 @@ public class UseCaseConfiguration {
             UserRepository userRepository,
             PasswordHasher passwordHasher,
             TotpCredentialRepository totpCredentialRepository,
+            EmailOtpCredentialRepository emailOtpCredentialRepository,
             RecoveryCodeRepository recoveryCodeRepository) {
-        return new DisableMfaUseCase(userRepository, passwordHasher, totpCredentialRepository, recoveryCodeRepository);
+        return new DisableMfaUseCase(
+                userRepository, passwordHasher, totpCredentialRepository, emailOtpCredentialRepository, recoveryCodeRepository);
     }
 
     @Bean
@@ -302,5 +326,44 @@ public class UseCaseConfiguration {
             UserRepository userRepository) {
         return new VerifyMfaRecoveryCodeChallengeUseCase(
                 mfaChallengeRepository, verificationTokenHasher, recoveryCodeRepository, recoveryCodeHasher, userRepository);
+    }
+
+    @Bean
+    public EnableEmailOtpUseCase enableEmailOtpUseCase(
+            UserRepository userRepository,
+            EmailOtpCredentialRepository emailOtpCredentialRepository,
+            TotpCredentialRepository totpCredentialRepository,
+            EmailOtpCodeRepository emailOtpCodeRepository,
+            EmailOtpCodeHasher emailOtpCodeHasher,
+            EmailSender emailSender) {
+        return new EnableEmailOtpUseCase(
+                userRepository,
+                emailOtpCredentialRepository,
+                totpCredentialRepository,
+                emailOtpCodeRepository,
+                emailOtpCodeHasher,
+                emailSender);
+    }
+
+    @Bean
+    public ConfirmEmailOtpEnrollmentUseCase confirmEmailOtpEnrollmentUseCase(
+            EmailOtpCredentialRepository emailOtpCredentialRepository,
+            EmailOtpCodeRepository emailOtpCodeRepository,
+            EmailOtpCodeHasher emailOtpCodeHasher,
+            RecoveryCodeRepository recoveryCodeRepository,
+            RecoveryCodeHasher recoveryCodeHasher) {
+        return new ConfirmEmailOtpEnrollmentUseCase(
+                emailOtpCredentialRepository, emailOtpCodeRepository, emailOtpCodeHasher, recoveryCodeRepository, recoveryCodeHasher);
+    }
+
+    @Bean
+    public VerifyMfaEmailOtpChallengeUseCase verifyMfaEmailOtpChallengeUseCase(
+            MfaChallengeRepository mfaChallengeRepository,
+            VerificationTokenHasher verificationTokenHasher,
+            EmailOtpCodeRepository emailOtpCodeRepository,
+            EmailOtpCodeHasher emailOtpCodeHasher,
+            UserRepository userRepository) {
+        return new VerifyMfaEmailOtpChallengeUseCase(
+                mfaChallengeRepository, verificationTokenHasher, emailOtpCodeRepository, emailOtpCodeHasher, userRepository);
     }
 }

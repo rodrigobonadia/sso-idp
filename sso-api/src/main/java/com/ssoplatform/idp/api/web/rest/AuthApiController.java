@@ -104,7 +104,7 @@ public class AuthApiController {
                 sessionEstablisher.establish(authenticated.result(), servletRequest, servletResponse);
                 yield LoginResponse.authenticated(authenticated.result().userId(), authenticated.result().email());
             }
-            case LoginOutcome.MfaChallengeIssued issued -> LoginResponse.mfaRequired(issued.challengeToken());
+            case LoginOutcome.MfaChallengeIssued issued -> LoginResponse.mfaRequired(issued.challengeToken(), issued.method());
         };
     }
 
