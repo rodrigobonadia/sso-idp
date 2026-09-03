@@ -137,6 +137,19 @@ import org.springframework.security.web.util.matcher.OrRequestMatcher;
  * calling OAuth CLIENT itself via hand-parsed HTTP Basic ({@code IntrospectTokenUseCase}/{@code
  * RevokeTokenUseCase}), never a Spring Security session, so there is no resource-owner session to
  * require and no browser cookie a CSRF attack could ride along with.
+ *
+ * <p>{@code /login/mfa} (Thymeleaf) and {@code /api/mfa/challenge/totp}/{@code
+ * /api/mfa/challenge/recovery-code} (REST), added in Phase 4.1, are permitted unauthenticated for
+ * the same reason {@code /login}/{@code /api/login} are: they run entirely BEFORE any session
+ * exists, identified only by the opaque {@code challengeToken} {@code LoginUseCase} issued - see
+ * {@code LoginOutcome.MfaChallengeIssued}. Unlike {@code /token}/{@code /introspect}/{@code
+ * /revoke}, these are NOT CSRF-exempt: they are called from the user's own browser mid-login (not
+ * server-to-server), so the same cookie-riding concern CSRF protection exists for applies, and the
+ * same {@code CookieCsrfTokenRepository} pattern {@code /api/login} already relies on covers them
+ * too. {@code /api/mfa/totp/enroll}, {@code /api/mfa/totp/confirm}, and {@code /api/mfa/disable}
+ * are deliberately NOT listed here: managing one's own MFA settings requires an existing session,
+ * exactly like {@code /api/account/change-password}, so they fall under the default {@code
+ * anyRequest().authenticated()} rule.
  */
 @Configuration
 @EnableWebSecurity
@@ -155,6 +168,7 @@ public class SecurityConfig {
                                 "/register/**",
                                 "/verify-email",
                                 "/login",
+                                "/login/mfa",
                                 "/forgot-password",
                                 "/forgot-password/**",
                                 "/reset-password",
@@ -167,7 +181,9 @@ public class SecurityConfig {
                                 "/api/verify-email",
                                 "/api/login",
                                 "/api/forgot-password",
-                                "/api/reset-password")
+                                "/api/reset-password",
+                                "/api/mfa/challenge/totp",
+                                "/api/mfa/challenge/recovery-code")
                         .permitAll()
                         .anyRequest()
                         .authenticated())

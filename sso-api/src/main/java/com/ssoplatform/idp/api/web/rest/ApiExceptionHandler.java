@@ -7,9 +7,15 @@ import com.ssoplatform.idp.application.exception.AccountNotVerifiedException;
 import com.ssoplatform.idp.application.exception.DuplicateEmailException;
 import com.ssoplatform.idp.application.exception.IncorrectCurrentPasswordException;
 import com.ssoplatform.idp.application.exception.InvalidCredentialsException;
+import com.ssoplatform.idp.application.exception.InvalidMfaCodeException;
+import com.ssoplatform.idp.application.exception.MfaAlreadyEnabledException;
+import com.ssoplatform.idp.application.exception.MfaEnrollmentNotFoundException;
+import com.ssoplatform.idp.application.exception.MfaNotEnabledException;
 import com.ssoplatform.idp.application.exception.TenantNotActiveException;
 import com.ssoplatform.idp.application.exception.TenantNotFoundException;
 import com.ssoplatform.idp.application.exception.VerificationTokenNotFoundException;
+import com.ssoplatform.idp.domain.mfa.InvalidRecoveryCodeException;
+import com.ssoplatform.idp.domain.mfa.InvalidTotpCodeException;
 import com.ssoplatform.idp.domain.user.InvalidEmailException;
 import com.ssoplatform.idp.domain.user.UserStateException;
 import com.ssoplatform.idp.domain.user.WeakPasswordException;
@@ -52,15 +58,32 @@ public class ApiExceptionHandler {
         InvalidEmailException.class,
         InvalidVerificationTokenException.class,
         TenantRequiredException.class,
-        IncorrectCurrentPasswordException.class
+        IncorrectCurrentPasswordException.class,
+        InvalidTotpCodeException.class,
+        InvalidRecoveryCodeException.class
     })
     public ResponseEntity<ErrorResponse> handleBadRequest(RuntimeException ex) {
         return respond(HttpStatus.BAD_REQUEST, ex);
     }
 
-    @ExceptionHandler({TenantNotFoundException.class, VerificationTokenNotFoundException.class})
+    @ExceptionHandler({
+        TenantNotFoundException.class,
+        VerificationTokenNotFoundException.class,
+        MfaEnrollmentNotFoundException.class,
+        MfaNotEnabledException.class
+    })
     public ResponseEntity<ErrorResponse> handleNotFound(RuntimeException ex) {
         return respond(HttpStatus.NOT_FOUND, ex);
+    }
+
+    @ExceptionHandler(MfaAlreadyEnabledException.class)
+    public ResponseEntity<ErrorResponse> handleConflict(MfaAlreadyEnabledException ex) {
+        return respond(HttpStatus.CONFLICT, ex);
+    }
+
+    @ExceptionHandler(InvalidMfaCodeException.class)
+    public ResponseEntity<ErrorResponse> handleUnauthorized(InvalidMfaCodeException ex) {
+        return respond(HttpStatus.UNAUTHORIZED, ex);
     }
 
     @ExceptionHandler(TenantNotActiveException.class)

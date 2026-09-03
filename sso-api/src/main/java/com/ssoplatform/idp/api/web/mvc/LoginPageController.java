@@ -7,7 +7,7 @@ import com.ssoplatform.idp.api.web.tenant.TenantRequiredException;
 import com.ssoplatform.idp.application.exception.ApplicationException;
 import com.ssoplatform.idp.application.usecase.tenant.TenantSummary;
 import com.ssoplatform.idp.application.usecase.user.LoginCommand;
-import com.ssoplatform.idp.application.usecase.user.LoginResult;
+import com.ssoplatform.idp.application.usecase.user.LoginOutcome;
 import com.ssoplatform.idp.application.usecase.user.LoginUseCase;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -69,9 +69,23 @@ public class LoginPageController {
             HttpServletResponse response) {
         TenantSummary tenant = requireTenant();
         try {
-            LoginResult result = loginUseCase.execute(new LoginCommand(tenant.tenantId(), form.getEmail(), form.getPassword()));
-            sessionEstablisher.establish(result, request, response);
-            return "redirect:" + resolvePostLoginRedirect(request, response);
+            LoginOutcome outcome =
+                    loginUseCase.execute(new LoginCommand(tenant.tenantId(), form.getEmail(), form.getPassword()));
+            return switch (outcome) {
+                case LoginOutcome.Authenticated authenticated -> {
+                    sessionEstablisher.establish(authenticated.result(), request, response);
+                    yield "redirect:" + resolvePostLoginRedirect(request, response);
+                }
+                case LoginOutcome.MfaChallengeIssued issued -> {
+                    // Kept entirely server-side (never a URL query parameter, which would leak it
+                    // via browser history/Referer) - see MfaChallengePageController's Javadoc.
+                    request.getSession(true)
+                            .setAttribute(
+                                    MfaChallengePageController.CHALLENGE_TOKEN_SESSION_ATTRIBUTE,
+                                    issued.challengeToken());
+                    yield "redirect:/login/mfa";
+                }
+            };
         } catch (ApplicationException ex) {
             // Covers InvalidCredentialsException/AccountNotVerifiedException/AccountLockedException/
             // AccountDisabledException: all user-facing login failures belong back on the form.

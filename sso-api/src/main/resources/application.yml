@@ -41,6 +41,14 @@ app:
     # randomly generated value kept out of the database entirely (see architecture_decisions.md,
     # decision (j)).
     encryption-secret: ${SIGNING_KEY_ENCRYPTION_SECRET:dev-only-insecure-default-change-me}
+  mfa:
+    totp:
+      # Master secret used to encrypt/decrypt TOTP secrets at rest (AES-256-GCM, mirrors
+      # signing-key.encryption-secret above but deliberately a SEPARATE secret - see
+      # AesGcmTotpSecretEncryptorAdapter and phase_4_1_totp_mfa.md). The default below is for
+      # local development ONLY - any real deployment MUST override this via the
+      # TOTP_SECRET_ENCRYPTION_SECRET environment variable.
+      encryption-secret: ${TOTP_SECRET_ENCRYPTION_SECRET:dev-only-insecure-default-change-me-too}
 
 management:
   endpoints:

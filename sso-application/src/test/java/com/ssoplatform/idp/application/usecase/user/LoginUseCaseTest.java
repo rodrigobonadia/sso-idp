@@ -12,13 +12,20 @@ import com.ssoplatform.idp.application.exception.AccountDisabledException;
 import com.ssoplatform.idp.application.exception.AccountLockedException;
 import com.ssoplatform.idp.application.exception.AccountNotVerifiedException;
 import com.ssoplatform.idp.application.exception.InvalidCredentialsException;
+import com.ssoplatform.idp.application.port.out.MfaChallengeRepository;
 import com.ssoplatform.idp.application.port.out.PasswordHasher;
+import com.ssoplatform.idp.application.port.out.TotpCredentialRepository;
 import com.ssoplatform.idp.application.port.out.UserRepository;
+import com.ssoplatform.idp.application.port.out.VerificationTokenHasher;
+import com.ssoplatform.idp.domain.mfa.EncryptedTotpSecret;
+import com.ssoplatform.idp.domain.mfa.TotpCredential;
 import com.ssoplatform.idp.domain.tenant.TenantId;
 import com.ssoplatform.idp.domain.user.Email;
-import com.ssoplatform.idp.domain.user.PersonName;
 import com.ssoplatform.idp.domain.user.HashedPassword;
+import com.ssoplatform.idp.domain.user.PersonName;
 import com.ssoplatform.idp.domain.user.User;
+import com.ssoplatform.idp.domain.verification.TokenHash;
+import java.time.Instant;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,15 +45,24 @@ class LoginUseCaseTest {
     @Mock
     private PasswordHasher passwordHasher;
 
+    @Mock
+    private TotpCredentialRepository totpCredentialRepository;
+
+    @Mock
+    private MfaChallengeRepository mfaChallengeRepository;
+
+    @Mock
+    private VerificationTokenHasher verificationTokenHasher;
+
     private LoginUseCase useCase;
 
     @BeforeEach
     void setUp() {
-        useCase = new LoginUseCase(userRepository, passwordHasher);
+        useCase = new LoginUseCase(
+                userRepository, passwordHasher, totpCredentialRepository, mfaChallengeRepository, verificationTokenHasher);
     }
 
-    @Test
-    void authenticatesAnActiveUserWithTheCorrectPasswordAndResetsFailedAttempts() {
+    private User activeUser() {
         User user = User.register(
                 TENANT_ID,
                 Email.of("someone@example.com"),
@@ -54,19 +70,72 @@ class LoginUseCaseTest {
                 PersonName.of("Doe"),
                 PASSWORD_HASH);
         user.verifyEmail();
+        return user;
+    }
+
+    @Test
+    void authenticatesAnActiveUserWithTheCorrectPasswordAndResetsFailedAttempts() {
+        User user = activeUser();
         when(userRepository.findByTenantIdAndEmail(TENANT_ID, Email.of("someone@example.com")))
                 .thenReturn(Optional.of(user));
         when(passwordHasher.matches(any(String.class), eq(PASSWORD_HASH))).thenReturn(true);
         when(userRepository.save(user)).thenReturn(user);
+        when(totpCredentialRepository.findByUserId(user.id())).thenReturn(Optional.empty());
 
-        LoginResult result =
+        LoginOutcome outcome =
                 useCase.execute(new LoginCommand(TENANT_ID.value(), "someone@example.com", "Str0ng!Passw0rd"));
 
+        assertThat(outcome).isInstanceOf(LoginOutcome.Authenticated.class);
+        LoginResult result = ((LoginOutcome.Authenticated) outcome).result();
         assertThat(result.userId()).isEqualTo(user.id().value());
         assertThat(result.tenantId()).isEqualTo(TENANT_ID.value());
         assertThat(result.email()).isEqualTo("someone@example.com");
         assertThat(user.failedLoginAttempts()).isZero();
         verify(userRepository).save(user);
+        verify(mfaChallengeRepository, never()).save(any());
+    }
+
+    @Test
+    void issuesAnMfaChallengeInsteadOfAuthenticatingWhenTheUserHasAnActiveTotpCredential() {
+        User user = activeUser();
+        when(userRepository.findByTenantIdAndEmail(TENANT_ID, Email.of("someone@example.com")))
+                .thenReturn(Optional.of(user));
+        when(passwordHasher.matches(any(String.class), eq(PASSWORD_HASH))).thenReturn(true);
+        when(userRepository.save(user)).thenReturn(user);
+        TotpCredential activeCredential =
+                TotpCredential.enroll(user.id(), EncryptedTotpSecret.of("ciphertext"), Instant.now());
+        activeCredential.activate(Instant.now());
+        when(totpCredentialRepository.findByUserId(user.id())).thenReturn(Optional.of(activeCredential));
+        when(verificationTokenHasher.hash(any())).thenReturn(TokenHash.of("some-hash"));
+
+        LoginOutcome outcome =
+                useCase.execute(new LoginCommand(TENANT_ID.value(), "someone@example.com", "Str0ng!Passw0rd"));
+
+        assertThat(outcome).isInstanceOf(LoginOutcome.MfaChallengeIssued.class);
+        String challengeToken = ((LoginOutcome.MfaChallengeIssued) outcome).challengeToken();
+        assertThat(challengeToken).isNotBlank();
+        verify(mfaChallengeRepository).save(any());
+        // The password check and account-status transition already ran (failed attempts reset,
+        // status validated) - only session establishment is deferred, not authentication itself.
+        assertThat(user.failedLoginAttempts()).isZero();
+    }
+
+    @Test
+    void doesNotIssueAChallengeForAPendingUnconfirmedTotpCredential() {
+        User user = activeUser();
+        when(userRepository.findByTenantIdAndEmail(TENANT_ID, Email.of("someone@example.com")))
+                .thenReturn(Optional.of(user));
+        when(passwordHasher.matches(any(String.class), eq(PASSWORD_HASH))).thenReturn(true);
+        when(userRepository.save(user)).thenReturn(user);
+        TotpCredential pendingCredential =
+                TotpCredential.enroll(user.id(), EncryptedTotpSecret.of("ciphertext"), Instant.now());
+        when(totpCredentialRepository.findByUserId(user.id())).thenReturn(Optional.of(pendingCredential));
+
+        LoginOutcome outcome =
+                useCase.execute(new LoginCommand(TENANT_ID.value(), "someone@example.com", "Str0ng!Passw0rd"));
+
+        assertThat(outcome).isInstanceOf(LoginOutcome.Authenticated.class);
+        verify(mfaChallengeRepository, never()).save(any());
     }
 
     @Test
@@ -91,13 +160,7 @@ class LoginUseCaseTest {
 
     @Test
     void rejectsAWeakShapedPasswordAsAnOrdinaryWrongPasswordRatherThanAStrengthPolicyError() {
-        User user = User.register(
-                TENANT_ID,
-                Email.of("someone@example.com"),
-                PersonName.of("Jane"),
-                PersonName.of("Doe"),
-                PASSWORD_HASH);
-        user.verifyEmail();
+        User user = activeUser();
         when(userRepository.findByTenantIdAndEmail(TENANT_ID, Email.of("someone@example.com")))
                 .thenReturn(Optional.of(user));
         when(passwordHasher.matches(any(String.class), eq(PASSWORD_HASH))).thenReturn(false);
@@ -113,13 +176,7 @@ class LoginUseCaseTest {
 
     @Test
     void rejectsAWrongPasswordWithTheGenericInvalidCredentialsExceptionAndRecordsTheFailedAttempt() {
-        User user = User.register(
-                TENANT_ID,
-                Email.of("someone@example.com"),
-                PersonName.of("Jane"),
-                PersonName.of("Doe"),
-                PASSWORD_HASH);
-        user.verifyEmail();
+        User user = activeUser();
         when(userRepository.findByTenantIdAndEmail(TENANT_ID, Email.of("someone@example.com")))
                 .thenReturn(Optional.of(user));
         when(passwordHasher.matches(any(String.class), eq(PASSWORD_HASH))).thenReturn(false);

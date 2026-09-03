@@ -9,7 +9,7 @@ import com.ssoplatform.idp.application.usecase.user.ChangePasswordCommand;
 import com.ssoplatform.idp.application.usecase.user.ChangePasswordResult;
 import com.ssoplatform.idp.application.usecase.user.ChangePasswordUseCase;
 import com.ssoplatform.idp.application.usecase.user.LoginCommand;
-import com.ssoplatform.idp.application.usecase.user.LoginResult;
+import com.ssoplatform.idp.application.usecase.user.LoginOutcome;
 import com.ssoplatform.idp.application.usecase.user.LoginUseCase;
 import com.ssoplatform.idp.application.usecase.user.RegisterUserCommand;
 import com.ssoplatform.idp.application.usecase.user.RegisterUserResult;
@@ -97,10 +97,15 @@ public class AuthApiController {
     public LoginResponse login(
             @RequestBody LoginRequest request, HttpServletRequest servletRequest, HttpServletResponse servletResponse) {
         TenantSummary tenant = requireTenant();
-        LoginResult result =
+        LoginOutcome outcome =
                 loginUseCase.execute(new LoginCommand(tenant.tenantId(), request.email(), request.password()));
-        sessionEstablisher.establish(result, servletRequest, servletResponse);
-        return new LoginResponse(result.userId(), result.email());
+        return switch (outcome) {
+            case LoginOutcome.Authenticated authenticated -> {
+                sessionEstablisher.establish(authenticated.result(), servletRequest, servletResponse);
+                yield LoginResponse.authenticated(authenticated.result().userId(), authenticated.result().email());
+            }
+            case LoginOutcome.MfaChallengeIssued issued -> LoginResponse.mfaRequired(issued.challengeToken());
+        };
     }
 
     @PostMapping("/forgot-password")

@@ -8,15 +8,21 @@ import com.ssoplatform.idp.application.port.out.DeviceCodeRepository;
 import com.ssoplatform.idp.application.port.out.EmailSender;
 import com.ssoplatform.idp.application.port.out.JwtSigner;
 import com.ssoplatform.idp.application.port.out.JwtVerifier;
+import com.ssoplatform.idp.application.port.out.MfaChallengeRepository;
 import com.ssoplatform.idp.application.port.out.OAuthClientRepository;
 import com.ssoplatform.idp.application.port.out.PasswordHasher;
 import com.ssoplatform.idp.application.port.out.PasswordResetTokenRepository;
 import com.ssoplatform.idp.application.port.out.PrivateKeyEncryptor;
+import com.ssoplatform.idp.application.port.out.RecoveryCodeHasher;
+import com.ssoplatform.idp.application.port.out.RecoveryCodeRepository;
 import com.ssoplatform.idp.application.port.out.RefreshTokenRepository;
 import com.ssoplatform.idp.application.port.out.ResourceRepository;
 import com.ssoplatform.idp.application.port.out.SigningKeyPairGenerator;
 import com.ssoplatform.idp.application.port.out.SigningKeyRepository;
 import com.ssoplatform.idp.application.port.out.TenantRepository;
+import com.ssoplatform.idp.application.port.out.TotpCodeVerifier;
+import com.ssoplatform.idp.application.port.out.TotpCredentialRepository;
+import com.ssoplatform.idp.application.port.out.TotpSecretEncryptor;
 import com.ssoplatform.idp.application.port.out.UserRepository;
 import com.ssoplatform.idp.application.port.out.VerificationTokenHasher;
 import com.ssoplatform.idp.application.port.out.VerificationTokenRepository;
@@ -25,6 +31,12 @@ import com.ssoplatform.idp.application.usecase.device.DecideDeviceAuthorizationU
 import com.ssoplatform.idp.application.usecase.device.FindDeviceAuthorizationUseCase;
 import com.ssoplatform.idp.application.usecase.device.RequestDeviceAuthorizationUseCase;
 import com.ssoplatform.idp.application.usecase.introspection.IntrospectTokenUseCase;
+import com.ssoplatform.idp.application.usecase.mfa.ConfirmTotpEnrollmentUseCase;
+import com.ssoplatform.idp.application.usecase.mfa.DisableMfaUseCase;
+import com.ssoplatform.idp.application.usecase.mfa.EnrollTotpUseCase;
+import com.ssoplatform.idp.application.usecase.mfa.GetMfaStatusUseCase;
+import com.ssoplatform.idp.application.usecase.mfa.VerifyMfaRecoveryCodeChallengeUseCase;
+import com.ssoplatform.idp.application.usecase.mfa.VerifyMfaTotpChallengeUseCase;
 import com.ssoplatform.idp.application.usecase.revocation.RevokeTokenUseCase;
 import com.ssoplatform.idp.application.usecase.signingkey.GenerateSigningKeyUseCase;
 import com.ssoplatform.idp.application.usecase.signingkey.ListSigningKeysUseCase;
@@ -90,8 +102,14 @@ public class UseCaseConfiguration {
     }
 
     @Bean
-    public LoginUseCase loginUseCase(UserRepository userRepository, PasswordHasher passwordHasher) {
-        return new LoginUseCase(userRepository, passwordHasher);
+    public LoginUseCase loginUseCase(
+            UserRepository userRepository,
+            PasswordHasher passwordHasher,
+            TotpCredentialRepository totpCredentialRepository,
+            MfaChallengeRepository mfaChallengeRepository,
+            VerificationTokenHasher verificationTokenHasher) {
+        return new LoginUseCase(
+                userRepository, passwordHasher, totpCredentialRepository, mfaChallengeRepository, verificationTokenHasher);
     }
 
     @Bean
@@ -223,5 +241,66 @@ public class UseCaseConfiguration {
             VerificationTokenHasher verificationTokenHasher) {
         return new RevokeTokenUseCase(
                 oauthClientRepository, clientSecretHasher, refreshTokenRepository, verificationTokenHasher);
+    }
+
+    @Bean
+    public EnrollTotpUseCase enrollTotpUseCase(
+            UserRepository userRepository,
+            TotpCredentialRepository totpCredentialRepository,
+            TotpSecretEncryptor totpSecretEncryptor) {
+        return new EnrollTotpUseCase(userRepository, totpCredentialRepository, totpSecretEncryptor);
+    }
+
+    @Bean
+    public GetMfaStatusUseCase getMfaStatusUseCase(TotpCredentialRepository totpCredentialRepository) {
+        return new GetMfaStatusUseCase(totpCredentialRepository);
+    }
+
+    @Bean
+    public ConfirmTotpEnrollmentUseCase confirmTotpEnrollmentUseCase(
+            TotpCredentialRepository totpCredentialRepository,
+            TotpSecretEncryptor totpSecretEncryptor,
+            TotpCodeVerifier totpCodeVerifier,
+            RecoveryCodeRepository recoveryCodeRepository,
+            RecoveryCodeHasher recoveryCodeHasher) {
+        return new ConfirmTotpEnrollmentUseCase(
+                totpCredentialRepository, totpSecretEncryptor, totpCodeVerifier, recoveryCodeRepository, recoveryCodeHasher);
+    }
+
+    @Bean
+    public DisableMfaUseCase disableMfaUseCase(
+            UserRepository userRepository,
+            PasswordHasher passwordHasher,
+            TotpCredentialRepository totpCredentialRepository,
+            RecoveryCodeRepository recoveryCodeRepository) {
+        return new DisableMfaUseCase(userRepository, passwordHasher, totpCredentialRepository, recoveryCodeRepository);
+    }
+
+    @Bean
+    public VerifyMfaTotpChallengeUseCase verifyMfaTotpChallengeUseCase(
+            MfaChallengeRepository mfaChallengeRepository,
+            VerificationTokenHasher verificationTokenHasher,
+            TotpCredentialRepository totpCredentialRepository,
+            TotpSecretEncryptor totpSecretEncryptor,
+            TotpCodeVerifier totpCodeVerifier,
+            UserRepository userRepository) {
+        return new VerifyMfaTotpChallengeUseCase(
+                mfaChallengeRepository,
+                verificationTokenHasher,
+                totpCredentialRepository,
+                totpSecretEncryptor,
+                totpCodeVerifier,
+                userRepository);
+    }
+
+    @Bean
+    public VerifyMfaRecoveryCodeChallengeUseCase verifyMfaRecoveryCodeChallengeUseCase(
+            MfaChallengeRepository mfaChallengeRepository,
+            VerificationTokenHasher verificationTokenHasher,
+            RecoveryCodeRepository recoveryCodeRepository,
+            RecoveryCodeHasher recoveryCodeHasher,
+            UserRepository userRepository) {
+        return new VerifyMfaRecoveryCodeChallengeUseCase(
+                mfaChallengeRepository, verificationTokenHasher, recoveryCodeRepository, recoveryCodeHasher, userRepository);
     }
 }
