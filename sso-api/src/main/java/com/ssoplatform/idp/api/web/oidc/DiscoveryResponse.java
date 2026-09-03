@@ -6,8 +6,7 @@ import java.util.List;
 /**
  * OIDC Discovery document (OpenID Connect Discovery 1.0 §3), published at {@code GET
  * /.well-known/openid-configuration}. Every field here reflects an OAuth2/OIDC capability this
- * server genuinely implements today - fields for capabilities not yet built ({@code
- * revocation_endpoint}, {@code introspection_endpoint}, etc.) are deliberately omitted entirely
+ * server genuinely implements today - a capability not yet built is deliberately omitted entirely
  * rather than advertised as a roadmap placeholder, so a real OIDC client library that trusts this
  * document at face value never attempts to call an endpoint that does not exist yet (see {@code
  * architecture_decisions.md}, Phase 3.5 scope decision). {@code userinfo_endpoint} was added in
@@ -19,7 +18,10 @@ import java.util.List;
  * correction to a gap Phase 3.6 itself left in this document - see {@code
  * architecture_decisions.md}). {@code device_authorization_endpoint} (RFC 8628 §4) and the
  * {@code "none"} entry in {@code token_endpoint_auth_methods_supported} were both added in Phase
- * 3.9 alongside public client support - see {@code OAuthClient#isPublic()}.
+ * 3.9 alongside public client support - see {@code OAuthClient#isPublic()}. {@code
+ * introspection_endpoint} (RFC 7662 §2) and {@code revocation_endpoint} (RFC 7009 §2) were
+ * added in Phase 3.10, once {@code POST /introspect} and {@code POST /revoke} actually existed to
+ * be advertised.
  *
  * <p>snake_case field names are mandated by the spec (like {@code TokenResponse}), hence the
  * explicit {@link JsonProperty} annotations.
@@ -31,6 +33,8 @@ public record DiscoveryResponse(
         @JsonProperty("device_authorization_endpoint") String deviceAuthorizationEndpoint,
         @JsonProperty("jwks_uri") String jwksUri,
         @JsonProperty("userinfo_endpoint") String userinfoEndpoint,
+        @JsonProperty("introspection_endpoint") String introspectionEndpoint,
+        @JsonProperty("revocation_endpoint") String revocationEndpoint,
         @JsonProperty("scopes_supported") List<String> scopesSupported,
         @JsonProperty("response_types_supported") List<String> responseTypesSupported,
         @JsonProperty("grant_types_supported") List<String> grantTypesSupported,

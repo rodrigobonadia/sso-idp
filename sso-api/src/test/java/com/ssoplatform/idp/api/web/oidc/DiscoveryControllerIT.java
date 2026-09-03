@@ -56,7 +56,11 @@ class DiscoveryControllerIT {
                         .value("http://acme-discovery.localhost:8080/device_authorization"))
                 .andExpect(jsonPath("$.jwks_uri")
                         .value("http://acme-discovery.localhost:8080/.well-known/jwks.json"))
-                .andExpect(jsonPath("$.userinfo_endpoint").value("http://acme-discovery.localhost:8080/userinfo"));
+                .andExpect(jsonPath("$.userinfo_endpoint").value("http://acme-discovery.localhost:8080/userinfo"))
+                .andExpect(jsonPath("$.introspection_endpoint")
+                        .value("http://acme-discovery.localhost:8080/introspect"))
+                .andExpect(jsonPath("$.revocation_endpoint")
+                        .value("http://acme-discovery.localhost:8080/revoke"));
     }
 
     @Test
@@ -82,8 +86,6 @@ class DiscoveryControllerIT {
                 .andExpect(jsonPath("$.token_endpoint_auth_methods_supported")
                         .value(contains("client_secret_basic", "none")))
                 .andExpect(jsonPath("$.code_challenge_methods_supported").value(contains("S256")))
-                .andExpect(jsonPath("$.revocation_endpoint").doesNotExist())
-                .andExpect(jsonPath("$.introspection_endpoint").doesNotExist())
                 .andExpect(jsonPath("$.registration_endpoint").doesNotExist());
     }
 

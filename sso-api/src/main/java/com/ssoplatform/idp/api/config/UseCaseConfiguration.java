@@ -24,6 +24,8 @@ import com.ssoplatform.idp.application.usecase.authorization.AuthorizeUseCase;
 import com.ssoplatform.idp.application.usecase.device.DecideDeviceAuthorizationUseCase;
 import com.ssoplatform.idp.application.usecase.device.FindDeviceAuthorizationUseCase;
 import com.ssoplatform.idp.application.usecase.device.RequestDeviceAuthorizationUseCase;
+import com.ssoplatform.idp.application.usecase.introspection.IntrospectTokenUseCase;
+import com.ssoplatform.idp.application.usecase.revocation.RevokeTokenUseCase;
 import com.ssoplatform.idp.application.usecase.signingkey.GenerateSigningKeyUseCase;
 import com.ssoplatform.idp.application.usecase.signingkey.ListSigningKeysUseCase;
 import com.ssoplatform.idp.application.usecase.tenant.CreateTenantUseCase;
@@ -194,5 +196,32 @@ public class UseCaseConfiguration {
     public GetUserInfoUseCase getUserInfoUseCase(
             SigningKeyRepository signingKeyRepository, JwtVerifier jwtVerifier, UserRepository userRepository) {
         return new GetUserInfoUseCase(signingKeyRepository, jwtVerifier, userRepository);
+    }
+
+    @Bean
+    public IntrospectTokenUseCase introspectTokenUseCase(
+            OAuthClientRepository oauthClientRepository,
+            ClientSecretHasher clientSecretHasher,
+            SigningKeyRepository signingKeyRepository,
+            JwtVerifier jwtVerifier,
+            RefreshTokenRepository refreshTokenRepository,
+            VerificationTokenHasher verificationTokenHasher) {
+        return new IntrospectTokenUseCase(
+                oauthClientRepository,
+                clientSecretHasher,
+                signingKeyRepository,
+                jwtVerifier,
+                refreshTokenRepository,
+                verificationTokenHasher);
+    }
+
+    @Bean
+    public RevokeTokenUseCase revokeTokenUseCase(
+            OAuthClientRepository oauthClientRepository,
+            ClientSecretHasher clientSecretHasher,
+            RefreshTokenRepository refreshTokenRepository,
+            VerificationTokenHasher verificationTokenHasher) {
+        return new RevokeTokenUseCase(
+                oauthClientRepository, clientSecretHasher, refreshTokenRepository, verificationTokenHasher);
     }
 }

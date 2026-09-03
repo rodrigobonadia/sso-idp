@@ -131,6 +131,12 @@ import org.springframework.security.web.util.matcher.OrRequestMatcher;
  * no resource-owner session to require and no browser cookie a CSRF attack could ride along with.
  * {@code /device} (the human-facing verification page for the SAME grant) is the opposite: it very much
  * needs a resource-owner session, exactly like {@code /authorize} - see the entry-point paragraph above.
+ *
+ * <p>{@code /introspect} (RFC 7662) and {@code /revoke} (RFC 7009), added in Phase 3.10, are permitted
+ * unauthenticated and CSRF-exempt for the exact same reason as {@code /token}: both authenticate the
+ * calling OAuth CLIENT itself via hand-parsed HTTP Basic ({@code IntrospectTokenUseCase}/{@code
+ * RevokeTokenUseCase}), never a Spring Security session, so there is no resource-owner session to
+ * require and no browser cookie a CSRF attack could ride along with.
  */
 @Configuration
 @EnableWebSecurity
@@ -140,7 +146,7 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http.csrf(csrf -> csrf.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
-                        .ignoringRequestMatchers("/token", "/device_authorization"))
+                        .ignoringRequestMatchers("/token", "/device_authorization", "/introspect", "/revoke"))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(
                                 "/actuator/**",
@@ -155,6 +161,8 @@ public class SecurityConfig {
                                 "/token",
                                 "/userinfo",
                                 "/device_authorization",
+                                "/introspect",
+                                "/revoke",
                                 "/api/register",
                                 "/api/verify-email",
                                 "/api/login",

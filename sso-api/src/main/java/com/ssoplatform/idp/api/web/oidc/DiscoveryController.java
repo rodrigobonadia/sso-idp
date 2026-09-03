@@ -28,8 +28,10 @@ import org.springframework.web.bind.annotation.RestController;
  * issuer decision (j) in {@code architecture_decisions.md}), so there is nothing here for a
  * framework-free use case to encapsulate.
  *
- * <p>See {@link DiscoveryResponse}'s Javadoc for why unimplemented endpoints (revocation,
- * introspection) are omitted entirely rather than advertised ahead of being built.
+ * <p>See {@link DiscoveryResponse}'s Javadoc for why an unimplemented endpoint would be omitted
+ * entirely rather than advertised ahead of being built - {@code introspection_endpoint} and
+ * {@code revocation_endpoint} were added in Phase 3.10 once {@code POST /introspect} and {@code
+ * POST /revoke} were implemented.
  *
  * <p>{@code "none"} in {@code token_endpoint_auth_methods_supported} (RFC 8414 §2, borrowed from
  * OIDC Discovery's own registry) reflects that a PUBLIC client authenticates with no method at
@@ -66,6 +68,8 @@ public class DiscoveryController {
                 issuer + "/device_authorization",
                 issuer + "/.well-known/jwks.json",
                 issuer + "/userinfo",
+                issuer + "/introspect",
+                issuer + "/revoke",
                 List.of("openid", "profile", "email"),
                 List.of("code"),
                 List.of(
